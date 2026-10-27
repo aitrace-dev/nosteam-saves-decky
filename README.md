@@ -12,8 +12,8 @@ The installed bridge passes repeated frozen-runtime checks. After restarting Dec
 Bazzite, status polls succeeded and Steam remained stable for over a minute of observation.
 Full gameplay and two-device acceptance checks are still required.
 
-This is a developer alpha, not an official Decky Store listing. Version 0.2.2 includes
-browser sign-in and a bundled Python agent: no separate terminal installation is required.
+This is a developer alpha, not an official Decky Store listing. Version 0.3.0 includes
+browser sign-in, clearer game/status sections and a bundled Python agent: no separate terminal installation is required.
 
 Open the plugin and select **Sign in**. Choose **Confirm sign-in** in the browser using your
 NoSteam Saves account; the device link is carried automatically, with no code to type.
@@ -42,7 +42,7 @@ npm ci
 npm run package
 ```
 
-The self-contained ZIP is written to `out/nosteam-saves-0.2.2.zip`. It includes pure Python
+The self-contained ZIP is written to `out/nosteam-saves-0.3.0.zip`. It includes pure Python
 dependencies and their license notices. The bundled runtime has been checked on Bazzite
 without installed site-packages, using temporary folders and no real saves.
 

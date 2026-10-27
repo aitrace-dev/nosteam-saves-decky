@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { callable, definePlugin, routerHook, toaster } from "@decky/api";
 import { ButtonItem, DropdownItem, PanelSection, PanelSectionRow } from "@decky/ui";
 import { FaCloud } from "react-icons/fa";
+import { CloudIntro, PluginTheme, SaveStatus } from "./theme";
 
 type Shortcut = { shortcut_id: string; title: string; registry: string };
 type Game = Shortcut & { game_id: string; status: string; original_options: string; wrapped_options?: string };
@@ -139,31 +140,31 @@ function Content() {
     void update(); const timer = setInterval(() => void update(), 3000);
     return () => { active = false; clearInterval(timer); };
   }, []);
-  return <>
-    <PanelSection title="NoSteam Saves"><PanelSectionRow>
-      <div>All supported non-Steam games sync automatically. Use Play as usual.</div>
-    </PanelSectionRow>{error && <PanelSectionRow><div role="alert">{error}</div></PanelSectionRow>}</PanelSection>
-    {!status?.connected ? <PanelSection title="Your account">
-      <PanelSectionRow><div>Sign in once on this Bazzite. We’ll connect it to your account and find your saves automatically.</div></PanelSectionRow>
+  return <div className="nss-root"><PluginTheme/>
+    <CloudIntro connected={status?.connected} games={status?.games.length} pending={status?.pending.length}/>
+    {error && <PanelSection><PanelSectionRow><div className="nss-alert" role="alert">{error}</div></PanelSectionRow></PanelSection>}
+    {!status?.connected ? <div className="nss-block nss-account"><PanelSection title="Connect your account">
+      <PanelSectionRow><div className="nss-copy">Sign in once on this Bazzite. We’ll connect it to your account and find your saves automatically.</div></PanelSectionRow>
       <PanelSectionRow><ButtonItem disabled={busy} onClick={() => perform(async () => {
         const result = await signIn();
         if (result.url) SteamClient.System.OpenInSystemBrowser(result.url);
         wakeAutomation();
       })}>{status?.sign_in.status === "waiting" ? "Continue sign-in" : "Sign in to NoSteam Saves"}</ButtonItem></PanelSectionRow>
-      {status?.sign_in.status === "waiting" && <PanelSectionRow><div>Choose “Confirm sign-in” in your browser. This Bazzite will connect automatically.</div></PanelSectionRow>}
-    </PanelSection> : <>
-      <PanelSection title="Automatic cloud saves">
-        <PanelSectionRow><div>Signed in · new non-Steam games are added automatically.</div></PanelSectionRow>
-        {backgroundError && <PanelSectionRow><div>{backgroundError}</div></PanelSectionRow>}
-        {!status.games.length && !status.pending.length && <PanelSectionRow><div>Looking for non-Steam games…</div></PanelSectionRow>}
-        {status.pending.map(game => <PanelSectionRow key={`${game.registry}:${game.shortcut_id}`}><div>
-          <strong>{game.title}</strong><div>{labels[game.status] || "Waiting for save discovery"}</div>
+      {status?.sign_in.status === "waiting" && <PanelSectionRow><div className="nss-copy">Choose “Confirm sign-in” in your browser. This Bazzite will connect automatically.</div></PanelSectionRow>}
+    </PanelSection></div> : <>
+      <div className="nss-block nss-overview"><PanelSection title="Cloud connection">
+        <PanelSectionRow><SaveStatus status="connected" label="Connected · automatic sync is on"/></PanelSectionRow>
+        <PanelSectionRow><div className="nss-copy">New non-Steam games are added automatically. Use Play as usual.</div></PanelSectionRow>
+        {backgroundError && <PanelSectionRow><div className="nss-alert">{backgroundError}</div></PanelSectionRow>}
+        {!status.games.length && !status.pending.length && <PanelSectionRow><div className="nss-copy">Looking for non-Steam games…</div></PanelSectionRow>}
+        {status.pending.map(game => <PanelSectionRow key={`${game.registry}:${game.shortcut_id}`}><div className="nss-pending">
+          <strong>{game.title}</strong><span>{labels[game.status] || "Waiting for save discovery"}</span>
         </div></PanelSectionRow>)}
-      </PanelSection>
-      {status.games.map(game => <PanelSection key={game.game_id} title={game.title}>
-        <PanelSectionRow><div aria-live="polite">{labels[game.status] || "Sync will retry"}</div></PanelSectionRow>
+      </PanelSection></div>
+      {status.games.map(game => <div className={`nss-block nss-game ${game.status === "conflict" ? "nss-game-conflict" : ""}`} key={game.game_id}><PanelSection title={game.title}>
+        <PanelSectionRow><SaveStatus status={game.status} label={labels[game.status] || "Sync will retry"}/></PanelSectionRow>
         {game.status === "conflict" && <>
-          <PanelSectionRow><div>Both devices have different progress. Both copies are kept.</div></PanelSectionRow>
+          <PanelSectionRow><div className="nss-copy">Both devices have different progress. Both copies are kept.</div></PanelSectionRow>
           <PanelSectionRow><ButtonItem disabled={busy} onClick={() => perform(() => resolve(game.game_id, "local"))}>Use this device’s progress</ButtonItem></PanelSectionRow>
           <PanelSectionRow><ButtonItem disabled={busy} onClick={() => perform(() => resolve(game.game_id, "cloud"))}>Use cloud progress</ButtonItem></PanelSectionRow>
         </>}
@@ -188,9 +189,9 @@ function Content() {
             toaster.toast({title:"Cloud saves paused",body:"Your local and cloud progress is kept."});
           });
         }}>{confirm === "pause:" + game.game_id ? "Confirm pause" : "Pause this game"}</ButtonItem></PanelSectionRow>
-      </PanelSection>)}
+      </PanelSection></div>)}
     </>}
-  </>;
+  </div>;
 }
 export default definePlugin(() => {
   routerHook.addGlobalComponent("NoSteamSavesAutomation", Automation);
