@@ -6,7 +6,12 @@ this repository contains only the plugin and its model-free Python agent.
 
 ## Alpha status
 
-This is a developer alpha, not an official Decky Store listing. Version 0.2.0 includes
+**Do not install 0.2.0:** its launcher incorrectly reused Decky’s frozen executable and
+was associated with a Steam webhelper crash loop. Version 0.2.1 uses system Python.
+The installed bridge passes repeated frozen-runtime checks; a full Decky restart and
+gameplay acceptance check are still required.
+
+This is a developer alpha, not an official Decky Store listing. Version 0.2.1 includes
 browser sign-in and a bundled Python agent: no separate terminal installation is required.
 
 Open the plugin and select **Sign in**. Approve this device in the browser using your
@@ -36,7 +41,7 @@ npm ci
 npm run package
 ```
 
-The self-contained ZIP is written to `out/nosteam-saves-0.2.0.zip`. It includes pure Python
+The self-contained ZIP is written to `out/nosteam-saves-0.2.1.zip`. It includes pure Python
 dependencies and their license notices. The bundled runtime has been checked on Bazzite
 without installed site-packages, using temporary folders and no real saves.
 

@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shlex
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -15,6 +16,11 @@ class Plugin:
     async def _command(self, arguments: list[str], secret: str | None = None):
         home = Path(decky.DECKY_USER_HOME)
         state = home / ".local/share/nosteam-saves"
+        # Decky is a frozen executable: sys.executable is PluginLoader, not Python.
+        frozen = getattr(sys, "frozen", False)
+        python = shutil.which("python3", path=os.defpath) if frozen else sys.executable
+        if not python:
+            raise RuntimeError("NoSteam Saves needs system Python 3.11 or newer.")
         vendor = Path(__file__).parent / "vendor"
         if not (vendor / "nosteam_client/cli.py").is_file():
             raise RuntimeError(
@@ -42,7 +48,7 @@ class Plugin:
                 }.items()
             )
             + "\nexec "
-            + shlex.quote(sys.executable)
+            + shlex.quote(python)
             + ' -m nosteam_client.cli "$@"\n'
         )
         with tempfile.NamedTemporaryFile(mode="w", dir=state, delete=False) as stream:
@@ -53,14 +59,18 @@ class Plugin:
             os.replace(temporary, executable)
         finally:
             temporary.unlink(missing_ok=True)
+        environment = {**os.environ, "HOME": str(home), "NOSTEAM_HOME": str(state)}
+        if frozen:
+            # PyInstaller's private libraries must not leak into the system interpreter.
+            original_libraries = environment.pop("LD_LIBRARY_PATH_ORIG", None)
+            environment.pop("LD_LIBRARY_PATH", None)
+            environment.pop("PYTHONHOME", None)
+            if original_libraries is not None:
+                environment["LD_LIBRARY_PATH"] = original_libraries
         process = await asyncio.create_subprocess_exec(
             str(executable),
             *arguments,
-            env={
-                **os.environ,
-                "HOME": str(home),
-                "NOSTEAM_HOME": str(home / ".local/share/nosteam-saves"),
-            },
+            env=environment,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -74,7 +84,17 @@ class Plugin:
             process.kill()
             await process.wait()
             raise RuntimeError("Sync timed out. Local saves are safe.") from None
-        result = json.loads(stdout)
+        except asyncio.CancelledError:
+            if process.returncode is None:
+                process.kill()
+            await process.wait()
+            raise
+        try:
+            result = json.loads(stdout)
+        except (ValueError, UnicodeError):
+            raise RuntimeError(
+                "The save agent could not start. Check the plugin installation."
+            ) from None
         if process.returncode:
             raise RuntimeError(result.get("error", "NoSteam Saves operation failed"))
         return result
