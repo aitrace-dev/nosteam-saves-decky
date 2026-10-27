@@ -216,7 +216,7 @@ def negotiate(home: Path, shortcut: dict, remote) -> dict:
             "status": "needs_save",
             "suggested_roots": [],
             "rounds": 0,
-            "message": "No supported game prefix found. Launch the game once or choose a folder.",
+            "message": "Waiting for the game's save location. Discovery will retry automatically.",
         }
     response = remote.request(
         "POST",
@@ -265,8 +265,8 @@ def negotiate(home: Path, shortcut: dict, remote) -> dict:
         "rounds": response.get("round", 0),
         "ai": response.get("ai"),
         "message": (
-            "Potential saves found. Confirm the folder before enabling cloud saves."
+            "Save locations verified locally."
             if paths
-            else "No save found yet. Create an in-game save, then try again."
+            else "No save found yet. Discovery will retry automatically."
         ),
     }

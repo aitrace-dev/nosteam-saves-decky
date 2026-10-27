@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 
-from .config import lock
+from .config import lock, update_config
 from .storage import (
     apply_files,
     atomic_json,
@@ -30,7 +30,8 @@ class Offline(Exception):
 
 
 class Remote:
-    def __init__(self, config: dict, transport=None):
+    def __init__(self, config: dict, transport=None, home=None):
+        self.home = home
         self.client = httpx.Client(
             base_url=config["server"].rstrip("/"),
             headers={"Authorization": f"Bearer {config['token']}"},
@@ -46,6 +47,10 @@ class Remote:
             response = self.client.request(method, path, **kwargs)
         except httpx.TransportError as exc:
             raise Offline("Cloud unavailable; local saves are safe") from exc
+        if response.status_code == 401:
+            if getattr(self, "home", None) is not None:
+                update_config(lambda current: current.update(auth_required=True), self.home)
+            raise Offline("Sign in again to resume cloud saves. Local saves are safe.")
         if response.status_code == 409:
             raise Conflict("Both devices have changed saves. Choose which copy to use.")
         if response.status_code >= 500:

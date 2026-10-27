@@ -4,7 +4,8 @@ This client uses Decky development packages and public interfaces: `@decky/api`,
 and `@decky/rollup`. Their published licenses remain applicable. Dependency versions are
 recorded in `package-lock.json` and the Python project configuration.
 
-Python dependencies include HTTPX, ValvePython's `vdf` and PyYAML.
+Python dependencies include HTTPX, ValvePython's `vdf` and PyYAML. The plugin ZIP bundles
+their pure Python runtime dependencies, with license notices retained under `vendor/`.
 
 The cloud icon is Font Awesome's `cloud`, distributed through `react-icons`.
 Font Awesome Free icons are CC BY 4.0: https://fontawesome.com/license/free.

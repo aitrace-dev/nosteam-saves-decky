@@ -6,15 +6,26 @@ this repository contains only the plugin and its model-free Python agent.
 
 ## Alpha status
 
-This is an early developer alpha, not an official Decky Store listing or a finished public
-release. The account/device-pairing interface is still being built. The current setup uses
-an issued device bearer credential; it does not support the server's retired shared key.
-Do not enter a Clerk secret key, GCP credential or Gemini key into the plugin.
+This is a developer alpha, not an official Decky Store listing. Version 0.2.0 includes
+browser sign-in and a bundled Python agent: no separate terminal installation is required.
+
+Open the plugin and select **Sign in**. Approve this device in the browser using your
+NoSteam Saves account; the device link is carried automatically, with no code to type.
+The plugin discovers eligible non-Steam shortcuts and configures cloud saves automatically.
+Use Steam's normal Play button afterward.
+
+Known game definitions are checked locally. For unknown locations, the client exchanges
+bounded filesystem metadata with the hosted server, where Gemini proposes the next paths
+to check. Only locally verified paths can be enabled. Unresolved locations stay pending and
+retry automatically; there is no required game selection or folder picker. No AI runs on
+Bazzite. Discovery does not guarantee support for every game or save format.
 
 The sync engine downloads before launch, uploads after exit, queues offline progress,
 backs up local saves before restoring, and preserves conflicting versions for the user
-to choose. Only Steam's non-Steam shortcuts are eligible. Save discovery uses local game
-definitions and optional server-side AI assistance; no AI model runs on Bazzite.
+to choose. AI does not overwrite divergent progress. Only non-Steam shortcuts are eligible.
+
+Browser approval and controller behavior still need a full installed-plugin acceptance
+check. Test with disposable saves before relying on this alpha for game progress.
 
 ## Build
 
@@ -25,16 +36,9 @@ npm ci
 npm run package
 ```
 
-The ZIP is written to `out/nosteam-saves-0.1.0.zip`. For developer testing, the Python agent
-must still be installed separately on each device:
-
-```bash
-bash scripts/install-agent.sh
-```
-
-That installs a user-owned environment and an upload-retry service. Finish account pairing
-and test with disposable saves before relying on it for game progress. The ZIP alone does
-not install the agent yet.
+The self-contained ZIP is written to `out/nosteam-saves-0.2.0.zip`. It includes pure Python
+dependencies and their license notices. The bundled runtime has been checked on Bazzite
+without installed site-packages, using temporary folders and no real saves.
 
 ## Client checks
 

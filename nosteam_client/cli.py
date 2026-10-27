@@ -1,6 +1,7 @@
 import argparse
 import getpass
 import json
+import os
 import re
 import shutil
 import socket
@@ -38,16 +39,20 @@ def configure(server: str, token: str, home: Path):
     if len(token) < 32:
         raise ValueError("Use a server token of at least 32 characters")
     new = {"server": server.rstrip("/"), "token": token}
-    remote = Remote(new)
+    remote = Remote(new, home=home)
     try:
-        remote.request("GET", "/v1/games")
+        account = remote.request("GET", "/v1/me")
     finally:
         remote.close()
 
     def change(config):
+        if config.get("account_id") not in (None, account["user_id"]) and config["games"]:
+            raise ValueError("Pause existing games before signing in to a different account")
         if config.get("server") and config["server"] != new["server"] and config["games"]:
             raise ValueError("Disable existing games before switching servers")
         config.update(new)
+        config["account_id"] = account["user_id"]
+        config["auth_required"] = False
         config.setdefault("device", f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}")
 
     update_config(change, home)
@@ -76,8 +81,9 @@ def bind(
     resolved = roots_for(game, home)
     game["roots"] = [str(path) for path in resolved]
     files = capture(resolved)
-    executable = str(Path(sys.executable).parent / "nosteam")
+    executable = os.environ.get("NOSTEAM_EXECUTABLE", str(Path(sys.executable).parent / "nosteam"))
     options = launch_options(game_id, game["original_options"], executable)
+    game["wrapped_options"] = options
 
     def change(config):
         if "server" not in config:
@@ -167,7 +173,13 @@ def launch(sync: Sync, game: dict, command: list[str]) -> int:
     sync.status("playing")
     try:
         # No shell: Steam's expanded argv, working directory and environment are inherited.
-        result = subprocess.run(command, check=False)
+        environment = dict(os.environ)
+        if environment.pop("NOSTEAM_BUNDLED_PATH", None):
+            original = environment.pop("NOSTEAM_ORIGINAL_PYTHONPATH", "")
+            environment.pop("PYTHONPATH", None)
+            if original:
+                environment["PYTHONPATH"] = original
+        result = subprocess.run(command, check=False, env=environment)
     except BaseException:
         sync.status("interrupted")
         raise
@@ -192,6 +204,9 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("status")
     commands.add_parser("cloud-games")
     commands.add_parser("update-definitions")
+    commands.add_parser("sign-in")
+    commands.add_parser("poll-sign-in")
+    commands.add_parser("auto-plan")
     find = commands.add_parser("find-saves")
     find.add_argument("shortcut_id")
     find.add_argument("--registry", required=True)
@@ -203,6 +218,7 @@ def parser() -> argparse.ArgumentParser:
     enable.add_argument("--original-options", default=None)
     disable = commands.add_parser("disable")
     disable.add_argument("game")
+    disable.add_argument("--retry", action="store_true", help=argparse.SUPPRESS)
     for action in ("sync", "history"):
         item = commands.add_parser(action)
         item.add_argument("game")
@@ -224,7 +240,7 @@ def retry(home: Path):
     config = configuration(home)
     if "server" not in config:
         return
-    remote = Remote(config)
+    remote = Remote(config, home=home)
     try:
         for game_id, game in config["games"].items():
             try:
@@ -242,6 +258,14 @@ def retry(home: Path):
 
 
 def execute(args, home: Path):
+    if args.action in ("sign-in", "poll-sign-in"):
+        from .account import begin, poll
+
+        return begin(home) if args.action == "sign-in" else poll(home)
+    if args.action == "auto-plan":
+        from .automatic import plan
+
+        return plan(home)
     if args.action == "discover":
         catalog = read_json(home / "catalog.json", {})
         result = []
@@ -259,9 +283,15 @@ def execute(args, home: Path):
         return {"status": "connected"}
     config = configuration(home)
     if args.action == "status":
+        from .account import public_state
+
         return {
-            "connected": "server" in config,
+            "connected": "server" in config
+            and not config.get("auth_required")
+            and config.get("credential_expires", float("inf")) > time.time(),
             "server": config.get("server", ""),
+            "sign_in": public_state(home),
+            "pending": read_json(home / "automation.json", {}).get("pending", []),
             "games": [
                 {
                     "game_id": key,
@@ -280,7 +310,15 @@ def execute(args, home: Path):
 
         with lock(home / "games" / args.game / "session.lock", blocking=False):
             game = config["games"][args.game]
-            update_config(lambda current: current["games"].pop(args.game), home)
+            from .automatic import shortcut_key
+
+            def pause(current):
+                current["games"].pop(args.game)
+                key = shortcut_key(game)
+                if not args.retry and key not in current.setdefault("paused_shortcuts", []):
+                    current["paused_shortcuts"].append(key)
+
+            update_config(pause, home)
         return {"original_options": game["original_options"]}
     if args.action in ("retry", "daemon"):
         while True:
@@ -288,7 +326,7 @@ def execute(args, home: Path):
             if args.action == "retry":
                 return {"status": "retried"}
             time.sleep(30)
-    remote = Remote(config)
+    remote = Remote(config, home=home)
     try:
         if args.action == "cloud-games":
             return remote.request("GET", "/v1/games")

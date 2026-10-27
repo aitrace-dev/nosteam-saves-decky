@@ -1,8 +1,11 @@
-"""Decky adapter. Filesystem operations run in the separately installed user agent."""
+"""Decky adapter. Filesystem operations run in the bundled model-free agent."""
 
 import asyncio
 import json
 import os
+import shlex
+import sys
+import tempfile
 from pathlib import Path
 
 import decky
@@ -11,9 +14,45 @@ import decky
 class Plugin:
     async def _command(self, arguments: list[str], secret: str | None = None):
         home = Path(decky.DECKY_USER_HOME)
-        executable = home / ".local/share/nosteam-saves/venv/bin/nosteam"
-        if not executable.is_file():
-            raise RuntimeError("Install the NoSteam Saves agent in Desktop Mode first.")
+        state = home / ".local/share/nosteam-saves"
+        vendor = Path(__file__).parent / "vendor"
+        if not (vendor / "nosteam_client/cli.py").is_file():
+            raise RuntimeError(
+                "Install the complete NoSteam Saves ZIP, including its bundled agent."
+            )
+        state.mkdir(parents=True, exist_ok=True, mode=0o700)
+        executable = state / "nosteam"
+        fallback = (
+            "#!/bin/sh\nif [ ! -f "
+            + shlex.quote(str(vendor / "nosteam_client/cli.py"))
+            + ' ]; then\n  if [ "$1" = launch ] && [ "$3" = -- ]; then\n'
+            + '    shift 3\n    exec "$@"\n  fi\n  exit 2\nfi\n'
+            + 'export NOSTEAM_ORIGINAL_PYTHONPATH="${PYTHONPATH-}"\n'
+        )
+        body = (
+            fallback
+            + "\n".join(
+                "export " + key + "=" + shlex.quote(value)
+                for key, value in {
+                    "HOME": str(home),
+                    "NOSTEAM_HOME": str(state),
+                    "NOSTEAM_EXECUTABLE": str(executable),
+                    "PYTHONPATH": str(vendor),
+                    "NOSTEAM_BUNDLED_PATH": str(vendor),
+                }.items()
+            )
+            + "\nexec "
+            + shlex.quote(sys.executable)
+            + ' -m nosteam_client.cli "$@"\n'
+        )
+        with tempfile.NamedTemporaryFile(mode="w", dir=state, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(body)
+        try:
+            temporary.chmod(0o700)
+            os.replace(temporary, executable)
+        finally:
+            temporary.unlink(missing_ok=True)
         process = await asyncio.create_subprocess_exec(
             str(executable),
             *arguments,
@@ -29,7 +68,7 @@ class Plugin:
         try:
             stdout, _ = await asyncio.wait_for(
                 process.communicate((secret + "\n").encode() if secret is not None else None),
-                timeout=60,
+                timeout=240 if arguments[0] == "auto-plan" else 60,
             )
         except asyncio.TimeoutError:
             process.kill()
@@ -45,6 +84,15 @@ class Plugin:
 
     async def discover(self):
         return await self._command(["discover"])
+
+    async def sign_in(self):
+        return await self._command(["sign-in"])
+
+    async def poll_sign_in(self):
+        return await self._command(["poll-sign-in"])
+
+    async def automatic_plan(self):
+        return await self._command(["auto-plan"])
 
     async def connect(self, server: str, token: str):
         return await self._command(["connect", server, "--stdin"], token)
@@ -79,6 +127,9 @@ class Plugin:
             arguments.extend(["--save", path])
         return await self._command(arguments)
 
+    async def cancel_enable(self, game_id: str):
+        return await self._command(["disable", game_id, "--retry"])
+
     async def disable(self, game_id: str):
         return await self._command(["disable", game_id])
 
@@ -95,7 +146,22 @@ class Plugin:
         return await self._command(["rollback", game_id, revision])
 
     async def _main(self):
+        async def retry_loop():
+            while True:
+                try:
+                    await self._command(["retry"])
+                except Exception:
+                    pass  # Status is available in the panel; never log credentials or paths.
+                await asyncio.sleep(30)
+
+        self.retry_task = asyncio.create_task(retry_loop())
         decky.logger.info("NoSteam Saves loaded")
 
     async def _unload(self):
-        pass
+        task = getattr(self, "retry_task", None)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
