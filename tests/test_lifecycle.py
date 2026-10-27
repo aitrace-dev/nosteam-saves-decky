@@ -1,3 +1,4 @@
+import pytest
 import vdf
 from nosteam_client.cli import bind, execute, parser
 from nosteam_client.config import configuration, update_config
@@ -111,3 +112,49 @@ def test_ordinary_steam_games_cannot_be_excluded_or_listed(steam_home, tmp_path)
     with pytest.raises(ValueError, match="Non-Steam shortcut"):
         run(state, "exclude", "570", "--registry", str(registry))
     assert all(row["shortcut_id"] != "570" for row in run(state, "status")["library"])
+
+
+@pytest.mark.parametrize("candidate_count", [1, 2])
+def test_first_save_rechecks_previous_candidates_locally_without_another_ai_call(
+    steam_home, tmp_path, candidate_count
+):
+    import uuid
+
+    from nosteam_client.discovery import cached, negotiate
+    from nosteam_client.steam import discover
+
+    home, _ = steam_home
+    roaming = (
+        home
+        / ".local/share/Steam/steamapps/compatdata/2147484000/pfx"
+        / "drive_c/users/steamuser/AppData/Roaming"
+    )
+    roaming.mkdir(parents=True)
+    shortcut = discover()[0]
+    state = tmp_path / "state"
+    session = str(uuid.uuid4())
+
+    class Remote:
+        def request(self, method, path, **kwargs):
+            if path == "/v1/discovery":
+                return {
+                    "session": session,
+                    "round": 1,
+                    "status": "searching",
+                    "candidates": [
+                        {"root": "roaming-0", "path": "Studio/" + name, "operation": "probe"}
+                        for name in ["NewGame", "OtherGame"][:candidate_count]
+                    ],
+                }
+            assert kwargs["json"]["observations"][0]["status"] == "missing"
+            return {"session": session, "round": 1, "status": "needs_save", "matches": []}
+
+    assert negotiate(state, shortcut, Remote())["suggested_roots"] == []
+    save = roaming / "Studio/NewGame"
+    save.mkdir(parents=True)
+    (save / "slot.sav").write_text("first progress")
+    if candidate_count == 2:
+        other = roaming / "Studio/OtherGame"
+        other.mkdir(parents=True)
+        (other / "slot.sav").write_text("different progress")
+    assert cached(state, shortcut) == ([str(save)] if candidate_count == 1 else [])

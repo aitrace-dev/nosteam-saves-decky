@@ -14,6 +14,7 @@ vi.mock('@decky/ui',()=>({
 import plugin from './index';
 
 beforeEach(()=>{
+ sessionStorage.clear();
  const first={key:'first',game_id:'first-game',title:'First game',shortcut_id:'2147484000',registry:'/preview',status:'synced',original_options:'gamemoderun %command%',excluded:false,removed:false};
  const second={...first,key:'second',game_id:'second-game',title:'Second game',shortcut_id:'2147484001'};
  api.options='';
@@ -159,4 +160,12 @@ test('a temporary refresh failure recovers without remounting the selected contr
  await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
  expect(screen.queryByRole('alert')).toBeNull();
  expect(screen.getByRole('combobox',{name:'Game'})).toBe(selector);
+});
+
+test('selected game survives the native menu closing and reopening the panel',async()=>{
+ const first=render((plugin as any)().content);
+ await userEvent.selectOptions(await screen.findByRole('combobox',{name:'Game'}),'second');
+ first.unmount();
+ render((plugin as any)().content);
+ expect(await screen.findByRole('combobox',{name:'Game'})).toHaveProperty('value','second');
 });

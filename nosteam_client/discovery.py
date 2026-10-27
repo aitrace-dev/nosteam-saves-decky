@@ -200,10 +200,15 @@ def cached(home: Path, shortcut: dict) -> list[str]:
     result = read_json(cache_path(home, shortcut), {})
     scopes = scopes_for(shortcut, home)
     paths = []
-    for candidate in result.get("matches", []):
-        report = probe(candidate, scopes)
-        if report["save_files"] and not report["truncated"]:
-            paths.append(str(resolve(candidate, scopes)))
+    for candidates in (result.get("matches", []), result.get("probes", [])):
+        for candidate in candidates:
+            report = probe(candidate, scopes)
+            if report["save_files"] and not report["truncated"]:
+                path = str(resolve(candidate, scopes))
+                if path not in paths:
+                    paths.append(path)
+        if paths:
+            break
     # Never silently combine ambiguous saves from multiple accounts/installations.
     return paths if len(paths) == 1 else []
 
@@ -230,6 +235,7 @@ def negotiate(home: Path, shortcut: dict, remote) -> dict:
     )
     session = str(uuid.UUID(response["session"]))
     verified = {}
+    attempted = {}
     for round_number in range(1, 7):
         if response.get("session") != session:
             raise ValueError("Discovery session changed")
@@ -242,6 +248,12 @@ def negotiate(home: Path, shortcut: dict, remote) -> dict:
         for candidate in candidates:
             observation = probe(candidate, scopes)
             observations.append(observation)
+            if (
+                candidate.get("operation") == "probe"
+                and observation["status"] in ("missing", "empty", "inspected")
+                and not observation["truncated"]
+            ):
+                attempted[fingerprint(candidate)] = candidate
             if observation["save_files"] and not observation["truncated"]:
                 verified[fingerprint(candidate)] = str(resolve(candidate, scopes))
         response = remote.request(
@@ -258,7 +270,10 @@ def negotiate(home: Path, shortcut: dict, remote) -> dict:
     if len(matches) > 4 or any(fingerprint(candidate) not in verified for candidate in matches):
         raise ValueError("Server claimed an unverified save directory")
     paths = [verified[fingerprint(candidate)] for candidate in matches]
-    atomic_json(cache_path(home, shortcut), {"matches": matches, "session": session})
+    atomic_json(
+        cache_path(home, shortcut),
+        {"matches": matches, "probes": list(attempted.values()), "session": session},
+    )
     return {
         "status": "review" if paths else "needs_save",
         "suggested_roots": paths,

@@ -63,6 +63,16 @@ function idle(id: number): boolean {
   } catch { return false; } // An unavailable Steam store is never evidence that a game is idle.
 }
 
+const selectionStorageKey = "nosteam-saves:selected-game";
+let lastSelection = "";
+function readSelection() {
+  try { return sessionStorage.getItem(selectionStorageKey) || ""; }
+  catch { return lastSelection; }
+}
+function rememberSelection(key: string) {
+  lastSelection = key;
+  try { sessionStorage.setItem(selectionStorageKey,key); } catch { /* Selection still survives in memory. */ }
+}
 let backgroundError = "";
 let wakeAutomation = () => {};
 function Automation() {
@@ -127,7 +137,7 @@ function Content() {
   const [error, setError] = useState("");
   const [refreshError, setRefreshError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [selectedKey, setSelectedKey] = useState("");
+  const [selectedKey, setSelectedKey] = useState(readSelection);
   const [revisions, setRevisions] = useState<Record<string, Revision[]>>({});
   const [selectedRevision, setSelectedRevision] = useState<Record<string, string>>({});
   const [confirm, setConfirm] = useState("");
@@ -170,7 +180,7 @@ function Content() {
         {!library.length ? <PanelSectionRow><div className="nss-copy">No non-Steam games found yet. New shortcuts appear automatically.</div></PanelSectionRow> : <>
           <PanelSectionRow><DropdownItem layout="below" label="Game" selectedOption={item.key}
             rgOptions={library.map(game => ({data:game.key,label:game.title + (game.excluded ? " · excluded" : game.removed ? " · removed" : "")}))}
-            onChange={option => {setSelectedKey(String(option.data));setConfirm("");}}/></PanelSectionRow>
+            onChange={option => {rememberSelection(String(option.data));setSelectedKey(String(option.data));setConfirm("");}}/></PanelSectionRow>
           <PanelSectionRow><SaveStatus status={item.status} label={labels[item.status] || "Preparing cloud saves"}/></PanelSectionRow>
           {!item.game_id && !item.excluded && <PanelSectionRow><div className="nss-copy">We check known save locations first. Unresolved searches retry with limited AI assistance.</div></PanelSectionRow>}
           {item.removed && <PanelSectionRow><div className="nss-copy">Sync stops when a shortcut is removed. Your previous backups are kept in Your Saves.</div></PanelSectionRow>}
