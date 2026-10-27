@@ -144,13 +144,13 @@ function Content() {
       <div>All supported non-Steam games sync automatically. Use Play as usual.</div>
     </PanelSectionRow>{error && <PanelSectionRow><div role="alert">{error}</div></PanelSectionRow>}</PanelSection>
     {!status?.connected ? <PanelSection title="Your account">
-      <PanelSectionRow><div>Sign in once. We’ll find your games and their saves automatically.</div></PanelSectionRow>
+      <PanelSectionRow><div>Sign in once on this Bazzite. We’ll connect it to your account and find your saves automatically.</div></PanelSectionRow>
       <PanelSectionRow><ButtonItem disabled={busy} onClick={() => perform(async () => {
         const result = await signIn();
         if (result.url) SteamClient.System.OpenInSystemBrowser(result.url);
         wakeAutomation();
       })}>{status?.sign_in.status === "waiting" ? "Continue sign-in" : "Sign in to NoSteam Saves"}</ButtonItem></PanelSectionRow>
-      {status?.sign_in.status === "waiting" && <PanelSectionRow><div>Finish sign-in in your browser. This panel will connect automatically.</div></PanelSectionRow>}
+      {status?.sign_in.status === "waiting" && <PanelSectionRow><div>Choose “Confirm sign-in” in your browser. This Bazzite will connect automatically.</div></PanelSectionRow>}
     </PanelSection> : <>
       <PanelSection title="Automatic cloud saves">
         <PanelSectionRow><div>Signed in · new non-Steam games are added automatically.</div></PanelSectionRow>
