@@ -8,8 +8,9 @@ this repository contains only the plugin and its model-free Python agent.
 
 **Do not install 0.2.0:** its launcher incorrectly reused Decky’s frozen executable and
 was associated with a Steam webhelper crash loop. Version 0.2.1 uses system Python.
-The installed bridge passes repeated frozen-runtime checks; a full Decky restart and
-gameplay acceptance check are still required.
+The installed bridge passes repeated frozen-runtime checks. After restarting Decky on
+Bazzite, status polls succeeded and Steam remained stable for over a minute of observation.
+Full gameplay and two-device acceptance checks are still required.
 
 This is a developer alpha, not an official Decky Store listing. Version 0.2.1 includes
 browser sign-in and a bundled Python agent: no separate terminal installation is required.
