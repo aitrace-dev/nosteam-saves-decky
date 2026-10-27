@@ -1,0 +1,17 @@
+node_modules/
+dist/
+out/
+.venv/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.env*
+!.env.example
+.existing-env
+.secrets/
+*.pem
+*.key
+*credentials*.json
+*.sqlite*
+.DS_Store

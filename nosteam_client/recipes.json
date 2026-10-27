@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Onimusha: Way of the Sword",
+    "aliases": ["Onimusha: Way of the Sword", "Onimusha - Way of the Sword"],
+    "paths": [
+      "<winAppData>/GSE Saves/2638890/remote/win64_save",
+      "<winAppData>/Capcom/OnimushaWotS/<storeUserId>"
+    ]
+  }
+]
