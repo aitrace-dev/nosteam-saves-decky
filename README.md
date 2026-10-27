@@ -12,7 +12,7 @@ The installed bridge passes repeated frozen-runtime checks. After restarting Dec
 Bazzite, status polls succeeded and Steam remained stable for over a minute of observation.
 Full gameplay and two-device acceptance checks are still required.
 
-This is a developer alpha, not an official Decky Store listing. Version 0.3.0 includes
+This is a developer alpha, not an official Decky Store listing. Version 0.4.0 includes
 browser sign-in, clearer game/status sections and a bundled Python agent: no separate terminal installation is required.
 
 Open the plugin and select **Sign in**. Choose **Confirm sign-in** in the browser using your
@@ -42,7 +42,7 @@ npm ci
 npm run package
 ```
 
-The self-contained ZIP is written to `out/nosteam-saves-0.3.0.zip`. It includes pure Python
+The self-contained ZIP is written to `out/nosteam-saves-0.4.0.zip`. It includes pure Python
 dependencies and their license notices. The bundled runtime has been checked on Bazzite
 without installed site-packages, using temporary folders and no real saves.
 
@@ -64,3 +64,19 @@ testing requirements; publishing this source does not establish store eligibilit
 See https://github.com/SteamDeckHomebrew/decky-plugin-database/blob/main/.github/PULL_REQUEST_TEMPLATE/plugin_addition.md.
 
 MIT licensed. See `LICENSE` and `THIRD_PARTY.md` for notices.
+
+## Library controls and discovery limits
+
+The game dropdown shows one shortcut at a time. Exclude a game from cloud sync without
+removing it from Steam, and enable it again later. New shortcuts are discovered automatically;
+removed shortcuts stop scheduled sync while history is retained. A recognized reinstallation
+can reconnect its existing identity, keeping previous progress. Steam-owned games are never listed.
+
+Unknown save searches back off for 1, 2, 4 and then 7 days. Network failures wait 30 minutes;
+known definitions and verified cached paths are checked without model calls. The hosted server
+also enforces persistent global/account/game budgets before every paid request.
+
+Run `npm test` for the Decky React interaction suite. It covers game selection, polling,
+exclusion/re-enabling, restoring launch options, conflict choices and restore confirmation.
+Native controls are mocked in this suite; installed Steam panel layout is verified separately
+with actual Bazzite screenshots. A full real two-device gameplay handoff remains outstanding.

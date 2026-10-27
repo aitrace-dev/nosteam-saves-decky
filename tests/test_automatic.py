@@ -247,3 +247,25 @@ def test_signin_rejects_server_redirect_to_another_origin(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="destination"):
         account.begin(tmp_path, "https://example.test")
     assert not (tmp_path / "pairing.json").exists()
+
+
+def test_unchanged_unknown_game_is_not_sent_to_ai_every_poll_or_hour(tmp_path, monkeypatch):
+    item = shortcut(tmp_path)
+    home = prepare(
+        tmp_path,
+        monkeypatch,
+        [item],
+        {item["title"]: {"matched_title": None, "suggested_roots": []}},
+    )
+    calls = []
+    monkeypatch.setattr(
+        automatic, "negotiate", lambda *_: calls.append(1) or {"suggested_roots": []}
+    )
+    automatic.plan(home, now=100)
+    automatic.plan(home, now=101)
+    automatic.plan(home, now=3701)
+    assert len(calls) == 1
+    automatic.plan(home, now=100 + 86401)
+    assert len(calls) == 2
+    automatic.plan(home, now=100 + 2 * 86400 + 1)
+    assert len(calls) == 2

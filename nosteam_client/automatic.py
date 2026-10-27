@@ -50,6 +50,9 @@ def plan(home, now=None):
                 state["catalog_retry"] = now + 3600
         catalog = read_json(home / "catalog.json", {})
         shortcuts = discover()
+        from .library import reconcile
+
+        config = reconcile(home, shortcuts)
         suggestions = {shortcut_key(s): suggest(s, home, catalog) for s in shortcuts}
         identities = {
             shortcut_key(s): game_identity(s, suggestions[shortcut_key(s)].get("matched_title"))
@@ -79,12 +82,14 @@ def plan(home, now=None):
                 ):
                     # Catalog/cache matches do not consume the server model budget.
                     # Queue fairly across games instead of repeatedly restarting one unknown game.
-                    attempts[key] = now + 3600
-                    state["ai_retry"] = now + 65
+                    failures = state.setdefault("searches", {}).get(key, 0)
+                    attempts[key] = now + min(7, 2 ** min(failures, 3)) * 86400
+                    state["searches"][key] = failures + 1
+                    state["ai_retry"] = now + 600
                     try:
                         paths = negotiate(home, shortcut, remote)["suggested_roots"]
                     except (Offline, httpx.HTTPError, ValueError):
-                        attempts[key] = now + 300
+                        attempts[key] = now + 1800
                         paths = []
                 # Multiple possible account/installation folders remain pending for a future
                 # server conversation; they are never combined or presented as a mandatory picker.

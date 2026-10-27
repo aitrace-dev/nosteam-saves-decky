@@ -84,13 +84,22 @@ def bind(
     executable = os.environ.get("NOSTEAM_EXECUTABLE", str(Path(sys.executable).parent / "nosteam"))
     options = launch_options(game_id, game["original_options"], executable)
     game["wrapped_options"] = options
+    can_reconnect = False
 
     def change(config):
         if "server" not in config:
             raise ValueError("Connect your server first")
-        if game_id in config["games"]:
+        from .automatic import shortcut_key
+
+        if shortcut_key(game) in config.get("paused_shortcuts", []):
+            raise ValueError("This game is excluded from cloud sync")
+        if game_id in config["games"] and not (
+            can_reconnect and config["games"][game_id].get("removed")
+        ):
             raise ValueError("This game is already enabled; disable it before reconfiguring")
-        for existing in config["games"].values():
+        for existing_id, existing in config["games"].items():
+            if existing_id == game_id and can_reconnect:
+                continue
             if (existing["shortcut_id"], existing["registry"]) == (shortcut_id, registry):
                 raise ValueError("This shortcut is already enabled")
             for first in resolved:
@@ -103,10 +112,20 @@ def bind(
     from .config import lock
 
     with lock(home / "games" / game_id / "session.lock", blocking=False):
+        previous = configuration(home)["games"].get(game_id)
+        can_reconnect = bool(previous and previous.get("removed")) and not any(
+            (item["registry"], item["shortcut_id"])
+            == (previous["registry"], previous["shortcut_id"])
+            for item in discover()
+        )
         old_binding = read_json(home / "games" / game_id / "binding.json")
-        if old_binding and any(
-            old_binding.get(key) != game.get(key)
-            for key in ("source", "shortcut_id", "registry", "roots")
+        if (
+            old_binding
+            and not can_reconnect
+            and any(
+                old_binding.get(key) != game.get(key)
+                for key in ("source", "shortcut_id", "registry", "roots")
+            )
         ):
             raise ValueError("Existing local history belongs to a different installation")
         update_config(change, home)
@@ -207,6 +226,10 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("sign-in")
     commands.add_parser("poll-sign-in")
     commands.add_parser("auto-plan")
+    for action in ("exclude", "include"):
+        item = commands.add_parser(action)
+        item.add_argument("shortcut_id")
+        item.add_argument("--registry", required=True)
     find = commands.add_parser("find-saves")
     find.add_argument("shortcut_id")
     find.add_argument("--registry", required=True)
@@ -237,12 +260,16 @@ def parser() -> argparse.ArgumentParser:
 
 
 def retry(home: Path):
-    config = configuration(home)
+    from .library import reconcile
+
+    config = reconcile(home, discover())
     if "server" not in config:
         return
     remote = Remote(config, home=home)
     try:
         for game_id, game in config["games"].items():
+            if game.get("removed"):
+                continue
             try:
                 verify_shortcut(game)
                 sync = Sync(home, game_id, game, remote, config["device"])
@@ -258,6 +285,10 @@ def retry(home: Path):
 
 
 def execute(args, home: Path):
+    if args.action in ("exclude", "include"):
+        from .library import set_excluded
+
+        return set_excluded(home, args.shortcut_id, args.registry, args.action == "exclude")
     if args.action in ("sign-in", "poll-sign-in"):
         from .account import begin, poll
 
@@ -284,6 +315,10 @@ def execute(args, home: Path):
     config = configuration(home)
     if args.action == "status":
         from .account import public_state
+        from .library import library
+
+        rows = library(home)
+        config = configuration(home)
 
         return {
             "connected": "server" in config
@@ -291,6 +326,7 @@ def execute(args, home: Path):
             and config.get("credential_expires", float("inf")) > time.time(),
             "server": config.get("server", ""),
             "sign_in": public_state(home),
+            "library": rows,
             "pending": read_json(home / "automation.json", {}).get("pending", []),
             "games": [
                 {

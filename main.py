@@ -153,6 +153,12 @@ class Plugin:
     async def disable(self, game_id: str):
         return await self._command(["disable", game_id])
 
+    async def exclude(self, shortcut_id: str, registry: str):
+        return await self._command(["exclude", shortcut_id, "--registry", registry])
+
+    async def include(self, shortcut_id: str, registry: str):
+        return await self._command(["include", shortcut_id, "--registry", registry])
+
     async def sync(self, game_id: str):
         return await self._command(["sync", game_id])
 
