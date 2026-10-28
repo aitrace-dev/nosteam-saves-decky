@@ -48,10 +48,11 @@ def steam_running():
         return True
 
 
-def write_registry(path, data):
+def write_registry(path, data, mode=0o600):
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".nosteam-setup-")
     try:
         with os.fdopen(descriptor, "wb") as stream:
+            os.fchmod(stream.fileno(), mode)
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())

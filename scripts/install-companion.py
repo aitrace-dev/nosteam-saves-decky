@@ -43,6 +43,8 @@ def install(source, home, systemd=True):
         launcher,
         "#!/bin/sh\n"
         + f"export NOSTEAM_PYTHON={shlex.quote(str(runtime / 'bin/python'))}\n"
+        # Steam injects game-overlay libraries that crash Chromium zygotes.
+        + "unset LD_PRELOAD\n"
         + f'exec {shlex.quote(str(release / "app/NoSteam"))} "$@"\n',
         0o755,
     )

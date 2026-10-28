@@ -136,3 +136,17 @@ def test_bazzite_home_alias_is_normalized_without_allowing_save_symlinks(tmp_pat
         checked_root(str(home_alias / "linked-save"), real_home / "state")
     with pytest.raises(ValueError):
         checked_root(str(home_alias), real_home / "state")
+
+
+def test_companion_shortcut_is_not_offered_as_a_game(steam_home):
+    home, registry = steam_home
+    with registry.open("rb") as stream:
+        data = vdf.binary_load(stream)
+    data["shortcuts"]["2"] = {
+        "appid": 2147484999 - 2**32,
+        "appname": "NoSteam",
+        "exe": f'"{home}/.local/bin/nosteam-companion"',
+    }
+    with registry.open("wb") as stream:
+        vdf.binary_dump(data, stream)
+    assert [game["title"] for game in discover(home)] == ["Non-Steam Game"]

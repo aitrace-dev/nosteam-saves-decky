@@ -23,8 +23,10 @@ service for the next login. Dependency installation needs internet access. It
 retains previous runtimes and existing `nosteam` commands because installed game
 wrappers may reference them. It does not edit Steam, delete saves or stop existing
 services. Re-login after replacing a running companion so the new service starts.
-`--no-systemd` writes the unit without enabling startup. Linux/Bazzite installation
-and controller operation still need physical-device acceptance testing.
+`--no-systemd` writes the unit without enabling startup. Installation, startup, account reporting and all five packaged app screens have
+been exercised on Bazzite. Launching the app through a Steam shortcut has also been exercised; the installed
+launcher clears overlay preloads that otherwise crash Chromium zygotes. Physical
+controller navigation and real-game handoffs still need acceptance testing.
 
 ## Use
 
@@ -91,3 +93,21 @@ restart, local block reuse, activation recovery, save setup rollback and a real
 Electron lifecycle check. These do not claim real two-device Bazzite acceptance.
 `npm run dev` and `/preview.html` provide clearly labelled example data for visual
 review; the preview is excluded from production builds.
+
+## Migrating an existing Decky installation
+
+Disable **NoSteam Saves** in Decky's plugin settings before migrating its stable
+launcher. Keep the plugin directory until launcher migration succeeds: old wrappers
+load the Python agent from that directory. With the companion installed, run its
+Python executable with `-m nosteam_client.migration`. This refuses migration while
+a game session holds a save lock, backs up the recognized old launcher, verifies
+the new runtime, and atomically replaces only the launcher. Steam launch options,
+save files, pending uploads and history remain in place. Unknown/custom launchers
+are left unchanged. The previous script is retained under `launcher-backups/` in
+the existing state directory. A missing runtime still allows an existing wrapped
+game command to launch without sync.
+
+In Bazzite Desktop Mode, add the application menu entry to Steam to open NoSteam
+from Gaming Mode. The native `steamos-add-to-steam` utility accepts
+`~/.local/share/applications/nosteam-companion.desktop`; let Steam update its own
+shortcuts rather than editing `shortcuts.vdf` while Steam is running.

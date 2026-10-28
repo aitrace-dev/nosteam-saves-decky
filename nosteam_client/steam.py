@@ -30,6 +30,10 @@ def discover(home: Path | None = None) -> list[dict]:
                 # Shortcut IDs have the high bit set; an ordinary Steam app ID is rejected.
                 if not app_id & 0x80000000:
                     continue
+                # The companion is a launcher, not a game or save-sync candidate.
+                executable = Path(item.get("exe", "").strip('"'))
+                if executable == home / ".local/bin/nosteam-companion":
+                    continue
                 found.append(
                     {
                         "shortcut_id": str(app_id),

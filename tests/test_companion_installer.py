@@ -1,4 +1,8 @@
 import importlib.util
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -42,3 +46,23 @@ def test_installer_retains_saves_wrappers_and_previous_runtime(tmp_path, monkeyp
     assert '"$@"' in launcher
     desktop = (home / ".local/share/applications/nosteam-companion.desktop").read_text()
     assert f'Exec="{home}/.local/bin/nosteam-companion"' in desktop
+
+    # Exercise the generated launcher with the Steam overlay environment that
+    # crashes Chromium's zygote when the app is opened from Gaming Mode.
+    executable = installed / "app/NoSteam"
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "print(json.dumps({'preload': os.environ.get('LD_PRELOAD'), 'args': sys.argv[1:]}))\n"
+    )
+    executable.chmod(0o755)
+    process = subprocess.Popen(
+        [str(home / ".local/bin/nosteam-companion"), "argument with spaces"],
+        env={**os.environ, "LD_PRELOAD": "/fixture/gameoverlayrenderer.so"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    output, _ = process.communicate(timeout=10)
+    assert process.returncode == 0
+    assert json.loads(output) == {"preload": None, "args": ["argument with spaces"]}
