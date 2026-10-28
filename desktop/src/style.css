@@ -89,6 +89,13 @@ main { padding-top: 30px; padding-bottom: 24px; }
 .sharing-strip { display: flex; gap: 24px; align-items: center; padding: 18px 22px; background: #1b3850; }
 .sharing-strip > h2 { margin: 0; font-size: 16px; }
 .sharing-strip > p { margin: 0; font-size: 13px; }
+.sharing-strip > button { margin-left: auto; }
+.transfer-job + .transfer-job { margin-top: 18px; padding-top: 10px; border-top: 1px solid #36516e; }
+.transfer-job progress { appearance: none; display: block; width: 100%; height: 8px; border: 0; border-radius: 4px; background: #102139; overflow: hidden; margin-bottom: 10px; }
+.transfer-job progress::-webkit-progress-bar { background: #102139; }
+.transfer-job progress::-webkit-progress-value { background: #81e9ee; }
+.transfer-job progress::-moz-progress-bar { background: #81e9ee; }
+.transfer-job > p { font-size: 13px; margin-top: 8px; }
 .save-row + .save-row { margin-top: 18px; padding-top: 18px; border-top: 1px solid #36516e; }
 .save-row > .row { min-height: 88px; padding-top: 0; }
 .save-row > .row > .artwork { width: 54px; min-width: 54px; height: 76px; border-radius: 5px; }
@@ -97,6 +104,17 @@ main { padding-top: 30px; padding-bottom: 24px; }
 .artwork-portrait .cover-caption { display: none; }
 .save-device { display: flex; justify-content: space-between; gap: var(--gap); align-items: center; padding: 15px 18px; background: #24415e; border-radius: 6px; }
 .save-device p { font-size: 12px; margin-top: 4px; }
+.device-matrix { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.device-cell { padding: 18px; border-radius: 7px; background: #24415e; min-width: 0; }
+.device-cell-heading { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
+.device-cell h4 { margin: 0; font: inherit; font-weight: 600; overflow-wrap: anywhere; }
+.device-cell-heading span { font-size: 12px; white-space: nowrap; }
+.device-cell > p { font-size: 12px; margin-top: 6px; }
+.device-cell > .device-sync-state { font-size: 14px; margin-top: 14px; }
+.state-up_to_date .device-sync-state { color: #81e9ee; }
+.state-conflict .device-sync-state, .state-pending .device-sync-state { color: #ffbc8b; }
+.device-cell > button { margin-top: 14px; }
+.save-actions { margin-top: 14px; }
 .actions { display: flex; gap: 12px; flex-wrap: wrap; }
 .empty { padding: 20px 0; }
 .empty h3 { font-size: 20px; }

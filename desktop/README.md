@@ -1,105 +1,93 @@
 # NoSteam companion alpha
 
-A standalone desktop interface and user background service for non-Steam save
-sync. The app does not depend on Decky. The directory name of this repository's
-parent checkout is historical; client code stays in the public client repository.
+A standalone gaming-style desktop app and background service for non-Steam saves
+and direct game transfers. Games, Saves, Transfers, Devices and Settings work
+without Decky. The server stores game-transfer metadata only; game bytes travel
+directly between your approved devices. Cloud save storage remains separate.
 
-This first slice opens Games, Saves, Transfers, Devices, and Settings. It reads
-existing save configuration, pairs accounts, checks configured saves, displays
-cloud history, resolves conflicts through the existing save engine, and retries
-pending save uploads independently of the window. Game sharing is explicitly off:
-full-game downloads and cross-device applied-revision reporting are not yet
-implemented. Configuring additional save wrappers also remains a later milestone.
+## Install on Linux x64
 
-The interface uses a colorful game-library layout, selectable cover tiles, local
-Steam artwork, and explicit save-state labels. Covers are read through the private
-service from discovered shortcuts' Steam grid directories. The app does not look
-up or upload your library to an artwork provider. Missing covers have a title-based
-fallback; images are size-limited and read without following symlinks.
+From this client repository, use Python 3.11+ with venv support and Node 24:
 
-## Run from source
+```bash
+cd desktop
+npm ci
+npm run package:linux
+cd ..
+python3 scripts/install-companion.py
+```
 
-Use Python 3.11+ and Node 24. From the client repository root:
+The installer creates a private Python environment, installs the client, copies the
+Electron shell, adds NoSteam to the application menu and enables a systemd user
+service for the next login. Dependency installation needs internet access. It
+retains previous runtimes and existing `nosteam` commands because installed game
+wrappers may reference them. It does not edit Steam, delete saves or stop existing
+services. Re-login after replacing a running companion so the new service starts.
+`--no-systemd` writes the unit without enabling startup. Linux/Bazzite installation
+and controller operation still need physical-device acceptance testing.
+
+## Use
+
+Sign in on each device. Games shows discovered non-Steam shortcuts and local Steam
+artwork. To set up saves, close Steam in Desktop Mode, choose **Set up saves**, then
+select the actual save folder. Setup journals the change and retains the original
+Steam launch settings. Reopen Steam afterward. Save checks, history, conflict
+choices and offline upload retries use the existing save engine. Closing the app
+leaves the background service running; suspension pauses work.
+
+Saves shows each game across your devices, including applied revisions, pending
+changes, conflicts and last report times. Offline or stale reports never claim a
+device is currently in sync. A device reports about every 30 seconds; freshness
+expires after 90 seconds. Playing or busy games remain uncertain until checked.
+
+Game sharing starts disabled. Enable it on participating devices, then choose
+**Share game folder** for a configured game on the source. Select the installation
+folder rather than the entire Proton prefix. On another device choose **Download**
+and a library folder. Transfers supports pause/resume, restart recovery, four
+parallel verified chunks, source failover and reuse of matching blocks from prior
+managed versions. Available devices with the same version can supply chunks.
+
+Each download installs into a new `NoSteam/<game>/<version>` folder. Existing game
+versions and saves are not overwritten. **Open folder** reveals the completed
+installation; adding it to Steam and choosing a compatible runtime remains manual.
+Known configured save folders are excluded from sharing. Review the source folder:
+unknown game-specific saves inside it cannot be identified automatically. Symlinks,
+special files and full Proton prefixes are rejected. Per-game manifests and paths
+stay on the devices; the server receives version, title, size and availability.
+
+The first transport is direct LAN IPv4 over TLS 1.3 with pinned device certificates
+and server-signed, source/version-scoped 60-second grants. TCP port 8468 must be
+reachable between devices. There is no relay fallback or automatic router setup;
+unreachable sources wait with durable progress. No game bytes pass through the
+backend. Source files must remain unchanged while sharing a version; re-share a
+changed installation. Automatic updates and bandwidth caps are not implemented.
+
+## Develop and verify
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install .
+.venv/bin/python -m pip install '.[test]'
+.venv/bin/python -m pytest -q tests
 cd desktop
 npm ci
 npm start
-```
-
-In the private development workspace, `uv sync --locked` installs the Python
-client; the desktop app also recognizes the workspace `.venv`. Set
-`NOSTEAM_PYTHON` to an absolute Python executable to use another environment.
-The desktop app starts the service if it is not already running.
-
-Closing the app leaves the service running. Reopening reuses the same service.
-The service holds a singleton lock and uses a mode-0600 Unix socket in the
-mode-0700 app state directory. The renderer has no Node access and talks through
-a narrow Electron IPC interface; only approved device-pairing URLs open externally.
-
-For a disposable development session, use an empty temporary directory:
-
-```bash
-NOSTEAM_HOME="$(mktemp -d /tmp/nosteam-dev.XXXXXX)" npm start
-```
-
-`NOSTEAM_HOME` defaults to `~/.local/share/nosteam-saves`, preserving existing
-pairing, game bindings, pending uploads, recovery journals, and backups. Do not
-run a development build against real state unless you intend its existing save
-sync commands to operate normally. There is no deletion, uninstall, or automatic
-migration command in this alpha. Existing launch wrappers and the legacy service
-are not rewritten or removed. Per-game locks protect concurrent save operations.
-
-## Background service on Linux
-
-The app starts a detached service for development. To start at login and restart
-after failure on Linux, install a systemd user unit using the absolute executable
-path from your installed Python environment:
-
-```ini
-[Unit]
-Description=NoSteam background sync
-After=network-online.target
-
-[Service]
-ExecStart=/ABSOLUTE/PATH/TO/.venv/bin/nosteam-service
-Restart=on-failure
-RestartSec=5
-UMask=0077
-
-[Install]
-WantedBy=default.target
-```
-
-Save as `~/.config/systemd/user/nosteam-companion.service`, then use
-`systemctl --user daemon-reload` and
-`systemctl --user enable --now nosteam-companion.service`. This source setup does
-not replace an existing service or provide a migration installer. Reboot/login
-startup and Steam Gaming Mode navigation still require Bazzite acceptance testing.
-Suspending the device suspends background work too.
-
-## Build and check
-
-```bash
 npm test
 npm run test:desktop
-npm run package:linux
 ```
 
-`test:desktop` launches the real Electron window and real Python service against
-temporary fixtures, verifies navigation and private IPC, closes the window, and
-checks that the service and save data remain intact. It needs a graphical session
-(use Xvfb in Linux CI). It stops its own service and removes only its temporary
-fixture directory. It never contacts a real account or gaming device.
+`NOSTEAM_PYTHON` selects an absolute Python executable. In the private workspace,
+`uv sync --locked` installs the client and the app recognizes the workspace venv.
+`NOSTEAM_HOME` defaults to `~/.local/share/nosteam-saves`; use a disposable empty
+folder for development. That directory contains pairing, bindings, pending saves,
+recovery journals and backups. Do not delete it during migration.
 
-The Linux package under `out/` is the desktop shell, not a complete installer.
-It still requires the separately installed Python client and `NOSTEAM_PYTHON`
-pointing at that runtime. Bundling the runtime, migrating old installations,
-desktop integration, and controller acceptance are later packaging work.
+The renderer is sandboxed, has no Node access, and uses narrow native IPC. The
+service exposes a mode-0600 private Unix socket, not a TCP control endpoint.
+Filesystem choices use native dialogs. Artwork comes from local Steam grid files;
+no production artwork lookup or library upload occurs. Missing covers use titles.
 
-`npm run dev` serves the interface for design inspection. Open `/preview.html`
-for clearly labeled example data or `/preview.html?empty` for first run. The
-preview performs no real operations and is excluded from the production build.
-Normal browser access to `/` cannot access the private service.
+Tests use temporary fixtures, including real pinned TLS transfers, resume after
+restart, local block reuse, activation recovery, save setup rollback and a real
+Electron lifecycle check. These do not claim real two-device Bazzite acceptance.
+`npm run dev` and `/preview.html` provide clearly labelled example data for visual
+review; the preview is excluded from production builds.

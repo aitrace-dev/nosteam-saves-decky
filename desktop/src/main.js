@@ -3,6 +3,7 @@ import '@fontsource/inter/latin-500.css';
 import '@fontsource/inter/latin-600.css';
 import '@fontsource/space-grotesk/latin-600.css';
 import './style.css';
+import { liveState, syncLabels } from './device-status.js';
 
 const bridge = window.nosteam;
 const screens = ['Games', 'Saves', 'Transfers', 'Devices', 'Settings'];
@@ -17,6 +18,8 @@ let lastRender = '';
 let notice = '';
 let featuredKey;
 const artCache = new Map();
+const transferSamples = new Map();
+const transferRates = new Map();
 const waitingArt = [];
 let activeArt = 0;
 function loadArt(key, kind) {
@@ -63,7 +66,7 @@ function artwork(game, kind = 'landscape') {
   const fallback = el('div', undefined, 'cover-fallback');
   fallback.append(el('span', game.title, 'cover-title'), el('span', 'Your non-Steam collection', 'cover-caption'));
   node.append(fallback);
-  artObserver.observe(node);
+  if (game.key) artObserver.observe(node);
   return node;
 }
 
@@ -138,6 +141,10 @@ function heading(title, copy) {
 async function command(action, args = {}) {
   if (!bridge) throw new Error('Open the installed NoSteam app to manage this device.');
   const queued = await bridge.submit(action, args);
+  return waitTask(queued);
+}
+async function waitTask(queued) {
+  if (!queued) return null;
   for (let attempt = 0; attempt < 120; attempt++) {
     const task = await bridge.task(queued.id);
     if (task.state === 'completed') return task.result;
@@ -146,6 +153,43 @@ async function command(action, args = {}) {
   }
   throw new Error('The command is still queued or running. Check Transfers for its progress.');
 }
+
+async function enableGames(enabled) {
+  await command('games-enable', { enabled });
+  await refresh(true);
+}
+async function setupSaves(game) {
+  const result = await waitTask(await bridge.setupSaves(game.key));
+  if (result) { showNotice(`Save sync configured for ${game.title}. Reopen Steam to play.`); await refresh(true); }
+}
+async function shareGame(game) {
+  const result = await waitTask(await bridge.shareGame(game.key));
+  if (result) { showNotice(`Indexing ${game.title} for sharing.`); location.hash = 'transfers'; await refresh(true); }
+}
+async function downloadGame(offer) {
+  const result = await waitTask(await bridge.downloadGame(offer.game, offer.version));
+  if (result) { showNotice(`${offer.title} added to the transfer queue.`); location.hash = 'transfers'; await refresh(true); }
+}
+function bytes(value) {
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GiB`;
+  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MiB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${Math.round(value)} B`;
+}
+function recordTransferRates(next) {
+  const now = performance.now();
+  for (const job of next.game_sync?.jobs || []) {
+    const previous = transferSamples.get(job.id);
+    transferRates.set(job.id, previous && previous.state === 'running' && job.state === 'running'
+      ? Math.max(0, (job.verified - previous.verified) / ((now - previous.at) / 1000)) : null);
+    transferSamples.set(job.id, { at: now, verified: job.verified, state: job.state });
+  }
+}
+const gamePhases = {
+  off: 'Game transfers are off', active: 'Ready for direct transfers',
+  signed_out: 'Sign in to enable transfers', waiting_for_server: 'Waiting for the account server',
+  port_in_use: 'Another app is using the transfer port', no_network_address: 'Waiting for a LAN connection',
+};
 
 async function sync(game) {
   showNotice(`Checking saves for ${game.title}…`);
@@ -229,6 +273,8 @@ function games(container) {
     const details = el('div', undefined, 'library-details');
     details.append(el('h3', shortcut.title));
     details.append(game ? status(game) : el('span', 'Save sync not configured', 'muted'));
+    if (!game && state.device.connected) details.append(button('Set up saves', () => setupSaves(shortcut)));
+    if (game && state.game_sync?.enabled) details.append(button('Share game folder', () => shareGame({ ...shortcut, id: game.id })));
     card.append(details);
     grid.append(card);
   }
@@ -236,19 +282,59 @@ function games(container) {
   if (!state.shortcuts.length) empty(listing, 'No non-Steam shortcuts found',
     'Add your games to Steam. They will appear here when NoSteam checks your library.');
   container.append(listing);
-  const sharing = panel('Game sharing is off', 'Direct game transfers are not available in this build.');
+  const sharing = panel(gamePhases[state.game_sync?.state || 'off'] || 'Game transfers need attention',
+    state.game_sync?.enabled ? 'Game files travel directly between your devices. Your server holds metadata only.' : 'Enable transfers to share and download game folders between your devices.');
   sharing.classList.add('sharing-strip');
+  sharing.append(button(state.game_sync?.enabled ? 'Turn off' : 'Enable transfers', () => enableGames(!state.game_sync?.enabled)));
   container.append(sharing);
+  const available = panel('Available on your devices');
+  const grouped = new Map();
+  for (const offer of state.game_sync?.offers || []) {
+    if (offer.device_id === state.game_sync.self_device_id) continue;
+    const key = `${offer.game}:${offer.version}`;
+    if (!grouped.has(key)) grouped.set(key, { ...offer, sources: [] });
+    grouped.get(key).sources.push(offer);
+  }
+  for (const offer of grouped.values()) {
+    const online = offer.sources.filter(source => source.available && Date.now() / 1000 - source.seen < 90).length;
+    const action = button(online ? 'Download' : 'Queue download', () => downloadGame(offer));
+    action.disabled = !state.game_sync.enabled;
+    available.append(row(offer.title, `${bytes(offer.size)} · Version ${offer.version.slice(0, 8)} · ${online} sources online`, action));
+  }
+  if (!grouped.size) empty(available, 'No games offered by another device yet', 'Enable transfers on another device, then share a game folder from its library.');
+  container.append(available);
+  const installed = state.game_sync?.jobs.filter(job => job.kind === 'download' && job.state === 'completed') || [];
+  if (installed.length) {
+    const downloaded = panel('Downloaded game folders');
+    for (const job of installed) downloaded.append(row(job.title, `Version ${job.version.slice(0, 8)} · Verified`, button('Open folder', () => bridge.openInstallation(job.id))));
+    container.append(downloaded);
+  }
 }
 function saves(container) {
-  heading('Saves', 'Your save progress, with its last confirmed revision on this device.');
+  heading('Saves', 'See which device has the latest progress for each game.');
   const listing = panel('Save progress');
-  if (!state.games.length) empty(listing, 'No games configured for saves yet',
+  const shared = sharedStatus();
+  const rows = new Map((shared?.games || []).map(game => [game.game, {
+    id: game.game, title: game.title, revision: game.revision, remoteOnly: true,
+  }]));
+  for (const game of state.games) rows.set(game.id, game);
+  if (!rows.size) empty(listing, 'No games configured for saves yet',
     'Existing NoSteam save settings appear here automatically. Setup for additional games is coming next.');
-  for (const game of state.games) {
+  for (const game of rows.values()) {
     const node = el('article', undefined, 'save-row');
-    const top = row(game.title, `Last synced ${time(game.synced_at)}`, status(game));
+    node.dataset.gameId = game.id;
+    const top = row(game.title, game.remoteOnly ? 'On your other devices' : `Last synced ${time(game.synced_at)}`,
+      game.remoteOnly ? undefined : status(game));
     top.prepend(artwork(game, 'portrait'));
+    node.append(top);
+    if (shared) {
+      node.append(deviceMatrix(game, shared));
+      const actions = el('div', undefined, 'actions save-actions');
+      actions.append(button('History', () => history(game)));
+      node.append(actions);
+      listing.append(node);
+      continue;
+    }
     const device = el('div', undefined, 'save-device');
     const detail = el('div');
     detail.append(el('span', state.device.name), el('p', game.revision
@@ -258,16 +344,78 @@ function saves(container) {
       () => game.status === 'conflict' ? resolve(game) : sync(game)));
     actions.append(button('History', () => history(game)));
     device.append(detail, actions);
-    node.append(top, device);
+    node.append(device);
     listing.append(node);
   }
   container.append(listing);
-  const other = panel('Other devices', 'Other devices have not reported their applied save revisions yet.');
-  other.append(el('p', 'A completed upload here does not confirm a download on another device.', 'muted'));
-  container.append(other);
+  if (shared) container.append(el('p', `Device reports checked ${time(shared.checked_at)}. Offline devices show their last confirmed state.`, 'muted'));
+  else {
+    const other = panel('Device reports', state.device.connected
+      ? 'Waiting for the first device report. Refresh to check your account.'
+      : 'Sign in to see save progress across your devices.');
+    other.append(button('Refresh device reports', refreshCloud));
+    if (cloudError) other.append(el('p', cloudError, 'attention'));
+    container.append(other);
+  }
+}
+
+function sharedStatus() {
+  const candidates = [cloud, state?.sync].filter(Boolean);
+  return candidates.sort((a, b) => b.checked_at - a.checked_at)[0];
+}
+function deviceMatrix(game, shared) {
+  const matrix = el('div', undefined, 'device-matrix');
+  const remote = shared.games.find(item => item.game === game.id);
+  for (const device of shared.devices) {
+    const cell = remote?.devices.find(item => item.device_id === device.id);
+    const current = liveState(shared, device, cell);
+    const block = el('section', undefined, `device-cell state-${current}`);
+    const header = el('div', undefined, 'device-cell-heading');
+    header.append(el('h4', device.name), el('span', device.id === shared.self_device_id ? 'This device' :
+      device.availability === 'online' && current !== 'last_confirmed' ? 'Online' :
+      device.availability === 'offline' ? 'Offline' : 'Linked', 'muted'));
+    block.append(header, el('p', syncLabels[current] || 'Not checked', 'device-sync-state'));
+    block.append(el('p', cell?.revision ? `Revision ${cell.revision.slice(0, 8)}` : 'No applied cloud revision', 'muted'));
+    block.append(el('p', cell?.reported_at ? `Reported ${time(cell.reported_at)}` : 'Waiting for a device report', 'muted'));
+    if (device.id === shared.self_device_id && !game.remoteOnly && !game.removed) {
+      block.append(button(game.status === 'conflict' ? 'Choose progress' : 'Check saves',
+        () => game.status === 'conflict' ? resolve(game) : sync(game)));
+    }
+    matrix.append(block);
+  }
+  return matrix;
 }
 function transfers(container) {
   heading('Transfers', 'Work managed by the background service.');
+  const downloads = panel('Game transfers');
+  const labels = { queued: 'Queued', running: 'Downloading', verifying: 'Verifying files',
+    activating: 'Finishing installation', waiting_for_source: 'Waiting for a source',
+    paused: 'Paused', failed: 'Needs attention', completed: 'Complete' };
+  for (const job of state.game_sync?.jobs || []) {
+    const block = el('article', undefined, 'transfer-job');
+    const controls = el('div', undefined, 'actions');
+    if (job.state !== 'completed') controls.append(button(['paused', 'failed'].includes(job.state) ? 'Resume' : 'Pause', async () => {
+      await command(['paused', 'failed'].includes(job.state) ? 'resume-transfer' : 'pause-transfer', { job: job.id });
+      await refresh(true);
+    }));
+    else if (job.kind === 'download') controls.append(button('Open folder', () => bridge.openInstallation(job.id)));
+    const label = job.kind === 'index' ? job.state === 'completed' ? 'Ready to share' : job.state === 'running' ? 'Indexing game folder' : labels[job.state] : labels[job.state];
+    block.append(row(job.title, `${label || job.state} · ${job.kind === 'index' ? 'Sharing' : 'Download'}`, controls));
+    if (job.kind === 'download') {
+      const progress = el('progress'); progress.max = job.total || 1; progress.setAttribute('aria-label', `${job.title} verified download progress`);
+      if (job.total) progress.value = job.verified;
+      block.append(progress, el('p', `${bytes(job.verified)} verified${job.total ? ` of ${bytes(job.total)}` : ''}`, 'muted'));
+      if (job.state === 'running') {
+        const rate = transferRates.get(job.id);
+        const remaining = rate > 0 && job.total ? Math.ceil((job.total - job.verified) / rate) : null;
+        block.append(el('p', rate > 0 ? `${bytes(rate)}/s verified${remaining !== null ? ` · About ${remaining < 60 ? `${remaining} seconds` : `${Math.ceil(remaining / 60)} minutes`} remaining` : ''}` : 'Calculating transfer speed…', 'muted'));
+      }
+    } else if (job.total) block.append(el('p', `${bytes(job.total)} indexed`, 'muted'));
+    if (job.error) block.append(el('p', job.error, 'attention'));
+    downloads.append(block);
+  }
+  if (!state.game_sync?.jobs.length) empty(downloads, 'No game transfers queued', 'Share a game on one device, then choose Download on another.');
+  container.append(downloads);
   const queue = panel('Background commands');
   for (const task of state.tasks) queue.append(row(task.action.replaceAll('-', ' '), time(task.created), el('span', task.state)));
   if (!state.tasks.length) empty(queue, 'Nothing waiting in the queue', 'Your save uploads are retried in the background.');
@@ -276,7 +424,9 @@ function transfers(container) {
   const saveState = { idle: 'Waiting for pending saves', checking: 'Checking pending uploads', signed_out: 'Sign in required', starting: 'Starting', error: 'Needs attention' };
   workers.append(row('Save upload retries', `Last checked ${time(state.workers.saves.checked_at)}`,
     el('span', saveState[state.workers.saves.state] || 'Unknown')),
-  row('Game transfers', 'Game sharing is off', el('span', 'Unavailable in this build', 'muted')));
+  row('Device reports', `Last sent ${time(state.workers.reporting?.checked_at)}`,
+    el('span', ({ idle: 'Reporting devices', signed_out: 'Sign in required', unavailable: 'Could not update device reports' })[state.workers.reporting?.state] || 'Starting')),
+  row('Game transfers', state.game_sync?.enabled ? 'Enabled on this device' : 'Disabled on this device', el('span', gamePhases[state.game_sync?.state || 'off'] || 'Needs attention', 'muted')));
   container.append(workers);
 }
 async function refreshCloud() {
@@ -294,16 +444,26 @@ function devices(container) {
   const linked = panel('Account devices');
   linked.append(button('Refresh account devices', refreshCloud));
   if (cloudError) linked.append(el('p', cloudError, 'attention'));
-  if (cloud) {
-    linked.append(el('p', `Account checked ${time(cloud.checked_at)}. Live availability is unknown.`, 'muted'));
-    for (const device of cloud.devices) linked.append(row(device.name, device.revoked ? 'Signed out' :
-      device.expires <= Date.now() / 1000 ? 'Credential expired' : 'Linked to your account', el('span', 'Online status unknown', 'muted')));
-    if (!cloud.devices.length) empty(linked, 'No linked devices', 'Sign in on each device to link it to your account.');
+  const shared = sharedStatus();
+  if (shared) {
+    linked.append(el('p', `Account checked ${time(shared.checked_at)}.`, 'muted'));
+    for (const device of shared.devices) {
+      const current = liveState(shared, device, { state: device.availability === 'unknown' ? 'not_reported' : 'up_to_date' });
+      const available = current === 'signed_out' ? 'Signed out' : current === 'not_reported' ? 'Not reported yet' : current === 'last_confirmed' ? 'Offline · last confirmed' : 'Online';
+      linked.append(row(device.name, device.seen ? `Last seen ${time(device.seen)}` : 'Linked to your account', el('span', available, 'muted')));
+    }
+    if (!shared.devices.length) empty(linked, 'No linked devices', 'Sign in on each device to link it to your account.');
   } else if (!cloudError) linked.append(el('p', 'Refresh to retrieve your account’s devices.', 'muted'));
   container.append(linked);
 }
 function settings(container) {
   heading('Settings', 'Account and background sync on this device.');
+  if (state.setup_error) {
+    const recovery = panel('Interrupted save setup');
+    recovery.append(el('p', state.setup_error), button('Finish recovery', async () => {
+      await command('recover-save-setup'); await refresh(true);
+    })); container.append(recovery);
+  }
   const account = panel('Account');
   account.append(row(state.device.name, state.device.connected ? 'This device is linked to your account.' : 'Sign in to connect cloud saves.',
     button(state.sign_in.status === 'waiting' ? 'Continue sign-in' : state.device.connected ? 'Renew sign-in' : 'Sign in', signIn, true)));
@@ -311,16 +471,19 @@ function settings(container) {
   const background = panel('Background service');
   background.append(row('Save sync', 'Existing Steam launch wrappers check saves before play and upload after exit.', el('span', 'Available')),
     row('Window behavior', 'Closing this window leaves background work running.', el('span', 'Runs independently')),
-    row('Game sharing', 'Direct game transfers are not available in this build.', el('span', 'Off')));
+    row('Game transfers', 'Direct downloads, verified chunks, and resumable progress.', button(state.game_sync?.enabled ? 'Disable transfers' : 'Enable transfers', () => enableGames(!state.game_sync?.enabled))));
   container.append(background);
 }
 
 function render(force = false) {
-  const signature = JSON.stringify([page, state, cloud, cloudError]);
+  const shared = sharedStatus();
+  const freshness = shared?.devices.map(device => liveState(shared, device, { state: 'up_to_date' }));
+  const signature = JSON.stringify([page, state, cloud, cloudError, freshness]);
   if (!force && lastRender === signature) return;
   lastRender = signature;
   const active = document.activeElement;
   const focusedGame = active?.dataset.gameKey;
+  const focusedSave = active?.closest('.save-row')?.dataset.gameId;
   const focusedLabel = active?.tagName === 'BUTTON' ? active.textContent : null;
   for (const link of document.querySelectorAll('nav a')) {
     if (link.textContent === page) link.setAttribute('aria-current', 'page');
@@ -335,6 +498,8 @@ function render(force = false) {
   ({ Games: games, Saves: saves, Transfers: transfers, Devices: devices, Settings: settings })[page](container);
   document.querySelector('#service-state').textContent = 'Background service connected';
   if (focusedGame) [...document.querySelectorAll('[data-game-key]')].find(node => node.dataset.gameKey === focusedGame)?.focus();
+  else if (focusedSave) [...document.querySelectorAll('.save-row')].find(node => node.dataset.gameId === focusedSave)
+    ?.querySelectorAll('button').forEach(node => { if (node.textContent === focusedLabel) node.focus(); });
   else if (focusedLabel) [...document.querySelectorAll('#content button')].find(node => node.textContent === focusedLabel)?.focus();
 }
 
@@ -343,6 +508,7 @@ async function refresh(force = false) {
   reading = true;
   try {
     state = await bridge.status();
+    recordTransferRates(state);
     render(force);
   } catch (error) {
     document.querySelector('#service-state').textContent = 'Background service unavailable';
@@ -364,7 +530,12 @@ function mount() {
     const link = el('a', name); link.href = `#${name.toLowerCase()}`;
     document.querySelector('nav').append(link);
   }
-  document.querySelector('#refresh').onclick = () => refresh(true);
+  document.querySelector('#refresh').onclick = async event => {
+    event.currentTarget.disabled = true;
+    try { await refresh(true); if (state?.device.connected) { await refreshCloud(); await command('refresh-games'); await refresh(true); } }
+    catch (error) { showNotice(error.message); }
+    finally { document.querySelector('#refresh').disabled = false; }
+  };
   window.addEventListener('hashchange', () => {
     page = screens.find(name => name.toLowerCase() === location.hash.slice(1)) || 'Games';
     if (state) render(true);

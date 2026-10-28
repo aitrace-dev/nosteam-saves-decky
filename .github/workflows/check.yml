@@ -11,18 +11,18 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: desktop/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m pip install ".[test]"
       - run: python -m pytest -q
-      - run: npm ci
-      - run: npm test
-      - run: npm run package
       - run: npm ci && npm test && xvfb-run -a npm run test:desktop
+        working-directory: desktop
+      - run: npm run package:linux
         working-directory: desktop
       - run: python -m pip wheel --no-deps --wheel-dir /tmp/nosteam-client-wheel .
       - uses: actions/upload-artifact@v4
         with:
-          name: nosteam-saves-decky-alpha
-          path: out/*.zip
+          name: nosteam-companion-linux-x64
+          path: desktop/out/NoSteam-linux-x64/

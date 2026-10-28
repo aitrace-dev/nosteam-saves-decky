@@ -52,6 +52,8 @@ def configure(server: str, token: str, home: Path):
             raise ValueError("Disable existing games before switching servers")
         config.update(new)
         config["account_id"] = account["user_id"]
+        if account.get("device_id"):
+            config["device_id"] = account["device_id"]
         config["auth_required"] = False
         config.setdefault("device", f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}")
 

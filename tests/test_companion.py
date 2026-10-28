@@ -53,7 +53,7 @@ def test_status_projects_existing_progress_without_exposing_tokens_or_changing_s
     result = service.snapshot()
     assert result["games"][0]["pending"] is True
     assert result["games"][0]["revision"] == "revision-1"
-    assert result["workers"]["games"] == {"state": "unavailable", "enabled": False}
+    assert result["workers"]["games"] == {"state": "off", "enabled": False}
     assert "private-token" not in json.dumps(result)
     assert "secret" not in json.dumps(result)
     assert {path: path.read_bytes() for path in protected} == before

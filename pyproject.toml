@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "nosteam-client"
 version = "0.4.1"
 requires-python = ">=3.11"
-dependencies = ["httpx>=0.28,<1", "vdf>=3.4,<4", "PyYAML>=6,<7"]
+dependencies = ["httpx>=0.28,<1", "vdf>=3.4,<4", "PyYAML>=6,<7", "PyJWT[crypto]>=2.10,<3"]
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]
