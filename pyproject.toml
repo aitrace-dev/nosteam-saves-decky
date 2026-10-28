@@ -13,6 +13,7 @@ test = ["pytest>=8,<10"]
 
 [project.scripts]
 nosteam = "nosteam_client.cli:main"
+nosteam-service = "nosteam_client.companion:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["nosteam_client"]

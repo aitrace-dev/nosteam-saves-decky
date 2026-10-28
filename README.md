@@ -1,4 +1,11 @@
-# NoSteam Saves · Decky client
+# NoSteam client
+
+The project is moving to a standalone app with background sync and no Decky
+dependency. See [desktop/README.md](desktop/README.md) to run the first companion
+alpha. Existing Decky packaging remains temporarily for installed-client
+compatibility; no device uninstall or migration has been performed.
+
+## Legacy Decky client
 
 Open-source Decky client for cloud saves **only for non-Steam games**, built for Bazzite.
 The hosted service is https://nosteam.bluggie.com. The server is maintained separately;

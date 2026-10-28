@@ -19,6 +19,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run package
+      - run: npm ci && npm test && xvfb-run -a npm run test:desktop
+        working-directory: desktop
       - run: python -m pip wheel --no-deps --wheel-dir /tmp/nosteam-client-wheel .
       - uses: actions/upload-artifact@v4
         with:
