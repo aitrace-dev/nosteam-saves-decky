@@ -252,12 +252,21 @@ class Companion:
             and not cfg.get("auth_required")
             and cfg.get("credential_expires", float("inf")) > time.time()
         )
+        shared = reporting.cached_status(self.home)
+        device_name = next(
+            (
+                item["name"]
+                for item in (shared or {}).get("devices", [])
+                if item["id"] == shared.get("self_device_id")
+            ),
+            socket.gethostname(),
+        )
         return {
             "protocol": PROTOCOL,
             "pid": os.getpid(),
             "started": self.started,
-            "device": {"name": socket.gethostname(), "connected": connected},
-            "sync": reporting.cached_status(self.home),
+            "device": {"name": device_name, "connected": connected},
+            "sync": shared,
             "sign_in": {
                 **account.public_state(self.home),
                 "server": cfg.get("server", account.SERVER),

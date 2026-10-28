@@ -21,13 +21,22 @@ test('real desktop app reuses existing saves and leaves its service running afte
   } } };
   await writeFile(path.join(home, 'config.json'), JSON.stringify(cfg), { mode: 0o600 });
   const env = { ...process.env, NOSTEAM_HOME: home };
+  delete env.ELECTRON_RUN_AS_NODE;
   let electron;
+  let electronProcess;
   let pid;
   try {
-    electron = await _electron.launch({ args: [desktop], env });
+    electron = await _electron.launch({
+      executablePath: process.env.NOSTEAM_ELECTRON,
+      args: process.env.NOSTEAM_ELECTRON ? [] : [desktop], env,
+    });
+    electronProcess = electron.process();
     const page = await electron.firstWindow();
+    page.setDefaultTimeout(8000);
+    page.setDefaultNavigationTimeout(8000);
     await page.waitForFunction(() => document.querySelector('#service-state')?.textContent === 'Background service connected');
     assert.equal(await page.locator('h1').textContent(), 'Games');
+    if (process.env.NOSTEAM_SCREENSHOT) await page.screenshot({ path: process.env.NOSTEAM_SCREENSHOT });
     await page.getByRole('link', { name: 'Saves', exact: true }).click();
     await page.getByRole('heading', { name: 'Celeste', exact: true }).waitFor();
     // IPC must remain valid after navigation changes the renderer's hash.
@@ -43,7 +52,14 @@ test('real desktop app reuses existing saves and leaves its service running afte
     assert.equal(preferences.contextIsolation, true);
     assert.equal(preferences.sandbox, true);
     assert.equal(preferences.nodeIntegration, false);
-    await electron.close();
+    const exited = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Closing the window did not exit the app')), 8000);
+      electronProcess.once('exit', () => { clearTimeout(timer); resolve(); });
+    });
+    await electron.evaluate(({ BrowserWindow }) => {
+      setImmediate(() => BrowserWindow.getAllWindows()[0].close());
+    });
+    await exited;
     electron = undefined;
     const after = await request('/v1/status', undefined, home);
     assert.equal(after.pid, pid);
@@ -51,7 +67,14 @@ test('real desktop app reuses existing saves and leaves its service running afte
     assert.equal(await readFile(path.join(saveRoot, 'slot.sav'), 'utf8'), 'preserve this progress');
     assert.deepEqual(JSON.parse(await readFile(path.join(home, 'config.json'))), cfg);
   } finally {
-    if (electron) await electron.close();
+    if (electron) {
+      let timer;
+      try {
+        await Promise.race([electron.close(), new Promise(resolve => {
+          timer = setTimeout(() => { electronProcess.kill('SIGKILL'); resolve(); }, 3000);
+        })]);
+      } finally { clearTimeout(timer); }
+    }
     if (!pid) { try { pid = (await request('/v1/status', undefined, home)).pid; } catch {} }
     if (pid) {
       try { process.kill(pid, 'SIGTERM'); } catch {}
