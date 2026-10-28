@@ -13,9 +13,9 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import game_files
+from . import game_bundle, game_files, game_install
 from .automatic import shortcut_key
-from .config import configuration, update_config
+from .config import configuration, lock, update_config
 from .peer import DirectClient, PeerServer, local_addresses
 from .steam import discover
 from .storage import atomic_json, checked_root, read_json
@@ -86,10 +86,21 @@ class GameSync:
                 0
             ]
         catalog = self.catalog if self.catalog and self.catalog.get("owner") == owner else None
+        jobs = []
+        for row in rows:
+            item = dict(row)
+            installation = read_json(self.home / "installed-games" / (row["game"] + ".json"), {})
+            item["ready"] = (
+                row["state"] == "completed"
+                and installation.get("version") == row["version"]
+                and installation.get("owner") == owner
+            )
+            item["proton"] = installation.get("proton", "") if item["ready"] else ""
+            jobs.append(item)
         return {
             "enabled": self.enabled(),
             "state": self.phase if self.enabled() else "off",
-            "jobs": [dict(row) for row in rows],
+            "jobs": jobs,
             "sharing": offered,
             "offers": catalog["offers"] if catalog else [],
             "self_device_id": catalog.get("self_device_id") if catalog else None,
@@ -246,7 +257,12 @@ class GameSync:
             row = db.execute(
                 "SELECT * FROM sources WHERE owner=? AND version=?", (self.owner(), version)
             ).fetchone()
-        return {**dict(row), "manifest": json.loads(row["manifest"])} if row else None
+        if not row:
+            return None
+        source = {**dict(row), "manifest": json.loads(row["manifest"])}
+        if source["manifest"]["schema"] == 2:
+            source["mounts"] = json.loads(row["root"])
+        return source
 
     def network(self):
         while not self.stop.is_set():
@@ -373,12 +389,19 @@ class GameSync:
 
     def index(self, job):
         root = self.check_root(job)
-        excluded = [
-            Path(path).expanduser().resolve()
-            for game in configuration(self.home)["games"].values()
-            for path in game.get("roots", [])
-        ]
-        manifest = game_files.index(root, job["game"], excluded, lambda: self.cancelled(job))
+        cfg = configuration(self.home)
+        binding = cfg["games"].get(job["game"])
+        if binding is None:
+            raise game_files.GameFileError("Configure saves before sharing this installation")
+        shortcut = next(
+            (item for item in discover() if shortcut_key(item) == shortcut_key(binding)), None
+        )
+        if shortcut is None:
+            raise game_files.GameFileError("This non-Steam shortcut is no longer installed")
+        with lock(self.home / "games" / job["game"] / "session.lock", blocking=False):
+            manifest, mounts = game_bundle.build(
+                root, job["game"], shortcut, binding, lambda: self.cancelled(job)
+            )
         version = game_files.version_id(manifest)
         size = game_files.validate(manifest)
         with self.connect() as db:
@@ -389,7 +412,7 @@ class GameSync:
                     version,
                     job["game"],
                     job["title"],
-                    str(root),
+                    json.dumps(mounts),
                     json.dumps(manifest, separators=(",", ":")),
                     size,
                 ),
@@ -552,7 +575,10 @@ class GameSync:
                     completed.add((file, chunk))
 
     def receive(self, job):
-        if job["state"] == "activating":
+        marker = (
+            Path(job["root"]) / "NoSteam" / job["game"] / job["version"] / ".nosteam-install.json"
+        )
+        if job["state"] == "activating" or read_json(marker, {}).get("job") == job["id"]:
             return self.activate(job)
         offers = []
         saved = self.home / "game-manifests" / f"{job['id']}.json"
@@ -570,6 +596,7 @@ class GameSync:
         if manifest["game"] != job["game"]:
             raise game_files.GameFileError("The selected game version belongs to another game")
         stage = self._stage(job)
+        game_bundle.check_filesystem(stage, manifest)
         self.update(job["id"], total=size)
         with self.connect() as db:
             completed = {
@@ -632,7 +659,8 @@ class GameSync:
                 for index, expected in enumerate(entry["hashes"]):
                     if hashlib.sha256(stream.read(game_files.BLOCK_SIZE)).hexdigest() != expected:
                         bad.append((file_index, index))
-                os.fchmod(stream.fileno(), 0o755 if entry["executable"] else 0o644)
+                if manifest["schema"] == 1:
+                    os.fchmod(stream.fileno(), 0o755 if entry["executable"] else 0o644)
                 os.fsync(stream.fileno())
         if bad:
             with self.connect() as db:
@@ -688,7 +716,24 @@ class GameSync:
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
-        self.update(job["id"], state="completed", destination=str(target), error=None)
+        manifest = read_json(self.home / "game-manifests" / f"{job['id']}.json")
+        if manifest and manifest["schema"] == 2:
+            game_files.validate(manifest, job["version"])
+            for entry in manifest["files"]:
+                with game_files.open_file(target, entry["path"]) as stream:
+                    os.fchmod(stream.fileno(), entry["mode"])
+                    os.utime(stream.fileno(), ns=(entry["mtime_ns"], entry["mtime_ns"]))
+            result = game_install.register(self.home, job["game"], job["version"], target, manifest)
+            state = "completed" if result["state"] == "ready" else result["state"]
+            self.update(
+                job["id"],
+                state=state,
+                destination=str(target),
+                error=result.get("message"),
+                retry_at=time.time() + 10,
+            )
+        else:
+            self.update(job["id"], state="completed", destination=str(target), error=None)
 
     def jobs(self):
         while not self.stop.is_set():
@@ -698,7 +743,7 @@ class GameSync:
             with self.connect() as db:
                 row = db.execute(
                     "SELECT * FROM jobs WHERE owner=? "
-                    "AND state IN ('queued','waiting_for_source','activating') "
+                    "AND state IN ('queued','waiting_for_source','activating','awaiting_steam') "
                     "AND retry_at<=? ORDER BY created LIMIT 1",
                     (self.owner(), time.time()),
                 ).fetchone()

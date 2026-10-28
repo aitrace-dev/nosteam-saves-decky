@@ -283,7 +283,7 @@ function games(container) {
     'Add your games to Steam. They will appear here when NoSteam checks your library.');
   container.append(listing);
   const sharing = panel(gamePhases[state.game_sync?.state || 'off'] || 'Game transfers need attention',
-    state.game_sync?.enabled ? 'Game files travel directly between your devices. Your server holds metadata only.' : 'Enable transfers to share and download game folders between your devices.');
+    state.game_sync?.enabled ? 'Game installations, Proton and launch setup travel directly between your devices. Your server holds metadata only.' : 'Enable transfers to share and download game folders between your devices.');
   sharing.classList.add('sharing-strip');
   sharing.append(button(state.game_sync?.enabled ? 'Turn off' : 'Enable transfers', () => enableGames(!state.game_sync?.enabled)));
   container.append(sharing);
@@ -305,8 +305,13 @@ function games(container) {
   container.append(available);
   const installed = state.game_sync?.jobs.filter(job => job.kind === 'download' && job.state === 'completed') || [];
   if (installed.length) {
-    const downloaded = panel('Downloaded game folders');
-    for (const job of installed) downloaded.append(row(job.title, `Version ${job.version.slice(0, 8)} · Verified`, button('Open folder', () => bridge.openInstallation(job.id))));
+    const downloaded = panel('Installed games');
+    for (const job of installed) {
+      const actions = el('div', undefined, 'actions');
+      if (job.ready) actions.append(button('Play in Steam', () => bridge.playInstallation(job.id), true));
+      actions.append(button('Open folder', () => bridge.openInstallation(job.id)));
+      downloaded.append(row(job.title, job.ready ? `Ready in Steam${job.proton ? ` · ${job.proton}` : ''}` : 'Files only · Re-share from an updated source to include Steam setup', actions));
+    }
     container.append(downloaded);
   }
 }
@@ -390,15 +395,19 @@ function transfers(container) {
   const downloads = panel('Game transfers');
   const labels = { queued: 'Queued', running: 'Downloading', verifying: 'Verifying files',
     activating: 'Finishing installation', waiting_for_source: 'Waiting for a source',
-    paused: 'Paused', failed: 'Needs attention', completed: 'Complete' };
+    paused: 'Paused', failed: 'Needs attention', completed: 'Complete',
+    awaiting_steam: 'Close Steam to finish setup', requires_dependency: 'Host setup required' };
   for (const job of state.game_sync?.jobs || []) {
     const block = el('article', undefined, 'transfer-job');
     const controls = el('div', undefined, 'actions');
-    if (job.state !== 'completed') controls.append(button(['paused', 'failed'].includes(job.state) ? 'Resume' : 'Pause', async () => {
-      await command(['paused', 'failed'].includes(job.state) ? 'resume-transfer' : 'pause-transfer', { job: job.id });
+    if (job.state !== 'completed') controls.append(button(['paused', 'failed', 'requires_dependency'].includes(job.state) ? 'Resume' : 'Pause', async () => {
+      await command(['paused', 'failed', 'requires_dependency'].includes(job.state) ? 'resume-transfer' : 'pause-transfer', { job: job.id });
       await refresh(true);
     }));
-    else if (job.kind === 'download') controls.append(button('Open folder', () => bridge.openInstallation(job.id)));
+    else if (job.kind === 'download') {
+      if (job.ready) controls.append(button('Play in Steam', () => bridge.playInstallation(job.id), true));
+      controls.append(button('Open folder', () => bridge.openInstallation(job.id)));
+    }
     const label = job.kind === 'index' ? job.state === 'completed' ? 'Ready to share' : job.state === 'running' ? 'Indexing game folder' : labels[job.state] : labels[job.state];
     block.append(row(job.title, `${label || job.state} · ${job.kind === 'index' ? 'Sharing' : 'Download'}`, controls));
     if (job.kind === 'download') {
@@ -411,6 +420,7 @@ function transfers(container) {
         block.append(el('p', rate > 0 ? `${bytes(rate)}/s verified${remaining !== null ? ` · About ${remaining < 60 ? `${remaining} seconds` : `${Math.ceil(remaining / 60)} minutes`} remaining` : ''}` : 'Calculating transfer speed…', 'muted'));
       }
     } else if (job.total) block.append(el('p', `${bytes(job.total)} indexed`, 'muted'));
+    if (job.ready) block.append(el('p', `Ready in Steam${job.proton ? ` · ${job.proton}` : ''}`, 'muted'));
     if (job.error) block.append(el('p', job.error, 'attention'));
     downloads.append(block);
   }

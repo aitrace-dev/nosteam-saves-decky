@@ -124,7 +124,17 @@ class PeerHandler(BaseHTTPRequestHandler):
                 entry = source["manifest"]["files"][int(file_index)]
                 index = int(chunk_index)
                 expected = entry["hashes"][index]
-                with open_file(Path(source["root"]), entry["path"]) as stream:
+                if source["manifest"]["schema"] == 2:
+                    mount = next(
+                        key
+                        for key in sorted(source["mounts"], key=len, reverse=True)
+                        if entry["path"].startswith(key + "/")
+                    )
+                    root = Path(source["mounts"][mount])
+                    name = entry["path"][len(mount) + 1 :]
+                else:
+                    root, name = Path(source["root"]), entry["path"]
+                with open_file(root, name) as stream:
                     stream.seek(index * BLOCK_SIZE)
                     data = stream.read(min(BLOCK_SIZE, entry["size"] - index * BLOCK_SIZE))
                 if hashlib.sha256(data).hexdigest() != expected:

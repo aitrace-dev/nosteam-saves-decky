@@ -38,6 +38,11 @@ snapshot.game_sync = {
       device_id: 'travel', name: 'Travel handheld', available: false, seen: now - 86400 },
   ],
   jobs: empty ? [] : [
+    { id: 'download-hollow-knight', kind: 'download', game: 'hollow-knight', title: 'Hollow Knight', version: 'c'.repeat(64),
+      state: 'completed', ready: true, proton: 'GE-Proton11-11', total: 8 * 1024 ** 3, verified: 8 * 1024 ** 3, created: now - 300 },
+    { id: 'download-ori', kind: 'download', game: 'ori', title: 'Ori and the Will of the Wisps', version: 'd'.repeat(64),
+      state: 'awaiting_steam', total: 15 * 1024 ** 3, verified: 15 * 1024 ** 3, created: now - 120,
+      error: 'Close Steam to add the game and its Proton configuration' },
     { id: 'download-celeste', kind: 'download', game: 'celeste', title: 'Celeste', version: 'a'.repeat(64),
       state: 'paused', total: 1280 * 1024 ** 2, verified: 640 * 1024 ** 2, created: now - 90 },
     { id: 'download-hades', kind: 'download', game: 'hades', title: 'Hades', version: 'b'.repeat(64),
@@ -107,5 +112,6 @@ window.nosteam = {
     return { id };
   },
   openInstallation: async () => {},
+  playInstallation: async () => {},
 };
 await import('./main.js');

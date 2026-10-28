@@ -49,13 +49,33 @@ and a library folder. Transfers supports pause/resume, restart recovery, four
 parallel verified chunks, source failover and reuse of matching blocks from prior
 managed versions. Available devices with the same version can supply chunks.
 
-Each download installs into a new `NoSteam/<game>/<version>` folder. Existing game
-versions and saves are not overwritten. **Open folder** reveals the completed
-installation; adding it to Steam and choosing a compatible runtime remains manual.
-Known configured save folders are excluded from sharing. Review the source folder:
-unknown game-specific saves inside it cannot be identified automatically. Symlinks,
-special files and full Proton prefixes are rejected. Per-game manifests and paths
-stay on the devices; the server receives version, title, size and availability.
+Each new share bundles the installation, its complete Proton prefix, the exact
+selected Proton runtime, launch flags, referenced user launchers/libraries and
+Steam artwork. Existing prefix links to older Proton DLLs are included too.
+Regular game files keep their bytes, permissions and modification times. Internal
+symlinks are relocated inside the bundle; Wine drive/device mappings are retained.
+Only paths in copied registry files and text launch helpers are adapted to the
+new library. Select the game installation folder; NoSteam finds its prefix and
+runtime from the current Steam settings automatically.
+
+Downloads install into a new `NoSteam/<game>/<version>/files` folder. Existing game
+versions and saves are retained. With Steam closed, NoSteam journals registration
+of the non-Steam shortcut, copied compatibility tool and save binding. If Steam is
+open, Transfers says **Close Steam to finish** and completes registration when it
+closes; an interrupted registration recovers without downloading again. **Play in
+Steam** appears only after registration succeeds. Destination Steam artwork is
+preserved. Re-sharing an imported game includes its relocated prefix and helpers.
+Older files-only offers must be re-shared by an updated source to gain Steam setup.
+
+The first supported bundle target is the same operating system and CPU architecture
+as the source, with a case-sensitive Linux library supporting symlinks. This includes
+case-distinct Wine prefix paths. External save folders outside the installation or
+prefix, ambiguous Steam accounts and unsupported symlinks stop setup with a clear
+message. Privileged/system launch helpers are reported as **Host setup required**
+on devices where they are missing; the app does not grant privileges. Existing
+save bindings need a clean save check and no pending upload before switching to a
+copied installation. Per-game manifests, prefix contents and local paths stay on
+the devices; the server receives version, title, size and availability only.
 
 The first transport is direct LAN IPv4 over TLS 1.3 with pinned device certificates
 and server-signed, source/version-scoped 60-second grants. TCP port 8468 must be
@@ -90,7 +110,9 @@ no production artwork lookup or library upload occurs. Missing covers use titles
 
 Tests use temporary fixtures, including real pinned TLS transfers, resume after
 restart, local block reuse, activation recovery, save setup rollback and a real
-Electron lifecycle check. These do not claim real two-device Bazzite acceptance.
+Electron lifecycle check. A disposable complete Linux bundle has also been transferred from macOS to Bazzite
+over LAN, resumed after restart and registered in an isolated Steam library. Real-game
+playability and a second physical Bazzite remain acceptance work.
 `npm run dev` and `/preview.html` provide clearly labelled example data for visual
 review; the preview is excluded from production builds.
 

@@ -83,3 +83,8 @@ export async function ensureService() {
   }
   throw new Error('Install the NoSteam Python client, then reopen the app. See the companion README.');
 }
+
+export function steamGameURL(appid) {
+  if (!Number.isInteger(appid) || appid < 0x80000000 || appid > 0xffffffff) throw new Error('This installation is not ready in Steam.');
+  return `steam://rungameid/${(BigInt(appid) << 32n) | 0x02000000n}`;
+}

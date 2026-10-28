@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import http from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { request, signInURL } from '../transport.mjs';
+import { request, signInURL, steamGameURL } from '../transport.mjs';
 
 test('only the approved pairing destination can open outside the app', () => {
   const server = 'https://nosteam.example.test';
@@ -34,4 +34,9 @@ test('local transport uses a Unix socket and preserves queued command data', asy
     await new Promise(resolve => server.close(resolve));
     await rm(directory, { recursive: true });
   }
+});
+
+test('only a registered non-Steam app ID can produce a Steam launch URL', () => {
+  assert.equal(steamGameURL(2147484000), 'steam://rungameid/9223373548716818432');
+  for (const value of [null, '2147484000', 570, 2 ** 32, -1, 1.5]) assert.throws(() => steamGameURL(value));
 });

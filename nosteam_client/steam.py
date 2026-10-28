@@ -59,7 +59,11 @@ def verify_shortcut(game: dict, home: Path | None = None) -> dict:
 
 
 def launch_options(game_id: str, original: str, executable: str) -> str:
-    if "nosteam" in original.lower():
+    words = shlex.split(original)
+    if any(
+        Path(word).name == "nosteam" and words[index + 1 : index + 2] == ["launch"]
+        for index, word in enumerate(words)
+    ):
         raise ValueError("Shortcut already has a NoSteam wrapper; disable it before reconfiguring")
     command = f"{shlex.quote(executable)} launch {shlex.quote(game_id)} --"
     if "%command%" in original:

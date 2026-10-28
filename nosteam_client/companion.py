@@ -433,12 +433,25 @@ class Handler(BaseHTTPRequestHandler):
                 manager = self.server.companion.game_sync
                 with manager.connect() as db:
                     row = db.execute(
-                        "SELECT destination FROM jobs WHERE id=? AND owner=? "
+                        "SELECT destination,game,version FROM jobs WHERE id=? AND owner=? "
                         "AND state='completed' AND kind='download'",
                         (self.path.rsplit("/", 1)[1], manager.owner()),
                     ).fetchone()
                 if row:
-                    return self.respond(200, {"path": row["destination"]})
+                    installed = read_json(
+                        manager.home / "installed-games" / (row["game"] + ".json"), {}
+                    )
+                    ready = (
+                        installed.get("version") == row["version"]
+                        and installed.get("owner") == manager.owner()
+                    )
+                    return self.respond(
+                        200,
+                        {
+                            "path": row["destination"],
+                            "appid": installed.get("appid") if ready else None,
+                        },
+                    )
                 return self.respond(404, {"error": "Installation not available"})
             if re.fullmatch(r"/v1/artwork/[a-f0-9]{64}/(portrait|landscape|hero)", self.path):
                 _, _, _, key, kind = self.path.split("/")

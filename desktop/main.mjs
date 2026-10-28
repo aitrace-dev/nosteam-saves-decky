@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, session } from 'electron';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ensureService, request, signInURL } from './transport.mjs';
+import { ensureService, request, signInURL, steamGameURL } from './transport.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const entry = pathToFileURL(path.join(here, 'dist/index.html')).href;
@@ -73,6 +73,12 @@ else {
       const result = await dialog.showOpenDialog(window, { title: 'Choose a library for this download', properties: ['openDirectory', 'createDirectory'] });
       if (result.canceled) return null;
       return request('/v1/tasks', { action: 'download-game', arguments: { game, version, root: result.filePaths[0] } });
+    });
+    ipcMain.handle('nosteam:play-installation', async (event, id) => {
+      trusted(event);
+      if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/.test(id)) throw new Error('Invalid installation.');
+      const result = await request(`/v1/installations/${id}`);
+      await shell.openExternal(steamGameURL(result.appid));
     });
     ipcMain.handle('nosteam:open-installation', async (event, id) => {
       trusted(event);

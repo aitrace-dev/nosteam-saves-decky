@@ -37,14 +37,27 @@ def relative(value):
         or str(path) != value
         or ".." in path.parts
         or len(path.parts) > 64
-        or any(char in value for char in "\\:\x00")
+        or any(char in value for char in "\\\x00")
+        or any(
+            ":" in part
+            and not (
+                index
+                and path.parts[index - 1] == "dosdevices"
+                and re.fullmatch(r"[a-z]:{1,2}", part)
+            )
+            for index, part in enumerate(path.parts)
+        )
         or any(ord(char) < 32 for char in value)
     ):
         raise GameFileError("Game file paths must stay inside the installation")
     return path
 
 
-def validate(manifest, expected=None):
+def validate(manifest, expected=None, *, case_sensitive=False):
+    if isinstance(manifest, dict) and manifest.get("schema") == 2:
+        from .game_bundle import validate_bundle
+
+        return validate_bundle(manifest, expected)
     if not isinstance(manifest, dict) or set(manifest) != {
         "schema",
         "game",
@@ -77,7 +90,7 @@ def validate(manifest, expected=None):
             )
             relative(name)
             normalized = unicodedata.normalize("NFC", name).casefold()
-            if name in paths or normalized in folded:
+            if name in paths or (not case_sensitive and normalized in folded):
                 raise GameFileError("Duplicate or case-colliding game paths")
             folded.add(normalized)
             paths[name] = kind
