@@ -51,6 +51,7 @@ snapshot.game_sync = {
 };
 let demoAt = Date.now();
 window.nosteam = {
+  close: async () => {},
   status: async () => {
     const current = Date.now() / 1000;
     const elapsed = (Date.now() - demoAt) / 1000;

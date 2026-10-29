@@ -3,6 +3,7 @@ import '@fontsource/inter/latin-500.css';
 import '@fontsource/inter/latin-600.css';
 import '@fontsource/space-grotesk/latin-600.css';
 import './style.css';
+import { controllerNavigation } from './controller.js';
 import { liveState, syncLabels } from './device-status.js';
 
 const bridge = window.nosteam;
@@ -16,7 +17,8 @@ let reading = false;
 let pollingPair = false;
 let lastRender = '';
 let notice = '';
-let featuredKey;
+let libraryView = 'local';
+let controls;
 const artCache = new Map();
 const transferSamples = new Map();
 const transferRates = new Map();
@@ -234,59 +236,62 @@ async function signIn() {
   } finally { busy = false; }
 }
 
+function gameDetails(shortcut, game) {
+  const dialog = document.querySelector('dialog');
+  dialog.replaceChildren(el('h2', shortcut.title));
+  dialog.append(game ? status(game) : el('p', 'Save sync not configured', 'muted'));
+  const actions = el('div', undefined, 'game-dialog-actions');
+  if (game) actions.append(button(game.status === 'conflict' ? 'Choose progress' : 'View saves', () => {
+    dialog.close();
+    if (game.status === 'conflict') resolve(game); else location.hash = 'saves';
+  }, true));
+  else if (state.device.connected) actions.append(button('Set up saves', async () => { dialog.close(); await setupSaves(shortcut); }, true));
+  if (game && state.game_sync?.enabled) actions.append(button('Share game folder', async () => { dialog.close(); await shareGame({ ...shortcut, id: game.id }); }));
+  actions.append(button('Back to library', () => dialog.close()));
+  dialog.append(actions);
+  dialog.showModal();
+}
+
 function games(container) {
-  heading('Games', 'Your collection. Your devices. Your next session.');
+  heading('Games', 'Choose a game to manage its saves and installation.');
   const configured = new Map(state.games.map(game => [game.key, game]));
-  if (state.shortcuts.length) {
-    const featured = state.shortcuts.find(shortcut => shortcut.key === featuredKey)
-      || state.shortcuts.find(shortcut => configured.get(shortcut.key)?.status === 'conflict') || state.shortcuts[0];
-    const game = configured.get(featured.key);
-    const feature = el('section', undefined, 'featured-game');
-    feature.append(artwork(featured, 'hero'));
-    const details = el('div', undefined, 'featured-details');
-    details.append(el('p', `On ${state.device.name}`, 'muted'), el('h2', featured.title));
-    details.append(game ? status(game) : el('p', 'Save sync not configured', 'muted'));
-    details.append(el('p', game?.status === 'conflict'
-      ? 'Local and cloud saves differ. Choose your progress before your next session.'
-      : 'Keep your progress close, wherever you play next.', 'feature-copy'));
-    details.append(button(game?.status === 'conflict' ? 'Choose progress' : 'View saves',
-      () => game?.status === 'conflict' ? resolve(game) : (location.hash = 'saves'), true));
-    feature.append(details);
-    container.append(feature);
+  const toolbar = el('div', undefined, 'library-toolbar');
+  const views = el('div', undefined, 'library-views');
+  views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Game library');
+  for (const [key, label] of [['local', 'This device'], ['available', 'Other devices'], ['installed', 'Installed']]) {
+    const tab = button(label, () => { libraryView = key; render(true); });
+    tab.dataset.focusId = 'library-' + key;
+    tab.setAttribute('aria-pressed', String(libraryView === key));
+    views.append(tab);
   }
-  const listing = el('section', undefined, 'library-section');
-  const title = el('header', undefined, 'section-heading');
-  title.append(el('h2', 'On this device'), el('span', `${state.shortcuts.length} ${state.shortcuts.length === 1 ? 'game' : 'games'}`, 'muted'));
-  listing.append(title);
-  const grid = el('div', undefined, 'library-grid');
-  for (const shortcut of state.shortcuts) {
-    const game = configured.get(shortcut.key);
-    const selected = shortcut.key === (featuredKey || state.shortcuts.find(item => configured.get(item.key)?.status === 'conflict')?.key || state.shortcuts[0]?.key);
-    const card = el('article', undefined, `library-game${selected ? ' selected' : ''}`);
-    const select = button('', () => { featuredKey = shortcut.key; render(true); });
-    select.className = 'cover-select';
-    select.dataset.gameKey = shortcut.key;
-    select.setAttribute('aria-label', `Show ${shortcut.title}`);
-    select.setAttribute('aria-pressed', String(selected));
-    select.append(artwork(shortcut));
-    card.append(select);
-    const details = el('div', undefined, 'library-details');
-    details.append(el('h3', shortcut.title));
-    details.append(game ? status(game) : el('span', 'Save sync not configured', 'muted'));
-    if (!game && state.device.connected) details.append(button('Set up saves', () => setupSaves(shortcut)));
-    if (game && state.game_sync?.enabled) details.append(button('Share game folder', () => shareGame({ ...shortcut, id: game.id })));
-    card.append(details);
-    grid.append(card);
+  const sharing = button(state.game_sync?.enabled ? 'Transfers on' : 'Transfers off', () => enableGames(!state.game_sync?.enabled));
+  sharing.className = 'sharing-toggle';
+  sharing.setAttribute('aria-pressed', String(!!state.game_sync?.enabled));
+  sharing.title = gamePhases[state.game_sync?.state || 'off'];
+  toolbar.append(views, sharing); container.append(toolbar);
+  if (libraryView === 'local') {
+    const listing = el('section', undefined, 'library-section');
+    const title = el('header', undefined, 'section-heading');
+    title.append(el('h2', 'On this device'), el('span', `${state.shortcuts.length} ${state.shortcuts.length === 1 ? 'game' : 'games'}`, 'muted'));
+    listing.append(title);
+    const grid = el('div', undefined, 'library-grid');
+    for (const shortcut of state.shortcuts) {
+      const game = configured.get(shortcut.key);
+      const card = button('', () => gameDetails(shortcut, game));
+      card.className = 'library-game cover-select';
+      card.dataset.gameKey = shortcut.key;
+      card.setAttribute('aria-label', `Manage ${shortcut.title}`);
+      card.setAttribute('aria-haspopup', 'dialog');
+      card.append(artwork(shortcut));
+      const details = el('div', undefined, 'library-details');
+      details.append(el('h3', shortcut.title), game ? status(game) : el('span', 'Save sync not configured', 'muted'));
+      card.append(details); grid.append(card);
+    }
+    listing.append(grid);
+    if (!state.shortcuts.length) empty(listing, 'No non-Steam shortcuts found', 'Add your games to Steam to see them here.');
+    container.append(listing);
   }
-  listing.append(grid);
-  if (!state.shortcuts.length) empty(listing, 'No non-Steam shortcuts found',
-    'Add your games to Steam. They will appear here when NoSteam checks your library.');
-  container.append(listing);
-  const sharing = panel(gamePhases[state.game_sync?.state || 'off'] || 'Game transfers need attention',
-    state.game_sync?.enabled ? 'Game installations, Proton and launch setup travel directly between your devices. Your server holds metadata only.' : 'Enable transfers to share and download game folders between your devices.');
-  sharing.classList.add('sharing-strip');
-  sharing.append(button(state.game_sync?.enabled ? 'Turn off' : 'Enable transfers', () => enableGames(!state.game_sync?.enabled)));
-  container.append(sharing);
+  if (libraryView === 'available') {
   const available = panel('Available on your devices');
   const grouped = new Map();
   for (const offer of state.game_sync?.offers || []) {
@@ -303,6 +308,8 @@ function games(container) {
   }
   if (!grouped.size) empty(available, 'No games offered by another device yet', 'Enable transfers on another device, then share a game folder from its library.');
   container.append(available);
+  }
+  if (libraryView === 'installed') {
   const installed = state.game_sync?.jobs.filter(job => job.kind === 'download' && job.state === 'completed') || [];
   if (installed.length) {
     const downloaded = panel('Installed games');
@@ -313,8 +320,14 @@ function games(container) {
       downloaded.append(row(job.title, job.ready ? `Ready in Steam${job.proton ? ` · ${job.proton}` : ''}` : 'Files only · Re-share from an updated source to include Steam setup', actions));
     }
     container.append(downloaded);
+  }    if (!installed.length) {
+      const downloaded = panel('Installed games');
+      empty(downloaded, 'No transferred installations yet', 'Choose Other devices to download a shared game.');
+      container.append(downloaded);
+    }
   }
 }
+
 function saves(container) {
   heading('Saves', 'See which device has the latest progress for each game.');
   const listing = panel('Save progress');
@@ -399,6 +412,7 @@ function transfers(container) {
     awaiting_steam: 'Close Steam to finish setup', requires_dependency: 'Host setup required' };
   for (const job of state.game_sync?.jobs || []) {
     const block = el('article', undefined, 'transfer-job');
+    block.dataset.jobId = job.id;
     const controls = el('div', undefined, 'actions');
     if (job.state !== 'completed') controls.append(button(['paused', 'failed', 'requires_dependency'].includes(job.state) ? 'Resume' : 'Pause', async () => {
       await command(['paused', 'failed', 'requires_dependency'].includes(job.state) ? 'resume-transfer' : 'pause-transfer', { job: job.id });
@@ -480,7 +494,7 @@ function settings(container) {
   container.append(account);
   const background = panel('Background service');
   background.append(row('Save sync', 'Existing Steam launch wrappers check saves before play and upload after exit.', el('span', 'Available')),
-    row('Window behavior', 'Closing this window leaves background work running.', el('span', 'Runs independently')),
+    row('Window behavior', 'Closing this window leaves background work running.', button('Close app', () => bridge.close())),
     row('Game transfers', 'Direct downloads, verified chunks, and resumable progress.', button(state.game_sync?.enabled ? 'Disable transfers' : 'Enable transfers', () => enableGames(!state.game_sync?.enabled))));
   container.append(background);
 }
@@ -492,6 +506,9 @@ function render(force = false) {
   if (!force && lastRender === signature) return;
   lastRender = signature;
   const active = document.activeElement;
+  const focusId = active?.dataset.focusId;
+  const focusedContext = active?.closest('[data-job-id], [data-game-id]');
+  const contextId = focusedContext?.dataset.jobId || focusedContext?.dataset.gameId;
   const focusedGame = active?.dataset.gameKey;
   const focusedSave = active?.closest('.save-row')?.dataset.gameId;
   const focusedLabel = active?.tagName === 'BUTTON' ? active.textContent : null;
@@ -507,10 +524,14 @@ function render(force = false) {
   account.onclick = () => { location.hash = 'settings'; };
   ({ Games: games, Saves: saves, Transfers: transfers, Devices: devices, Settings: settings })[page](container);
   document.querySelector('#service-state').textContent = 'Background service connected';
-  if (focusedGame) [...document.querySelectorAll('[data-game-key]')].find(node => node.dataset.gameKey === focusedGame)?.focus();
+  if (focusId) document.querySelector(`[data-focus-id="${focusId}"]`)?.focus({ preventScroll: true });
+  else if (focusedGame) [...document.querySelectorAll('[data-game-key]')].find(node => node.dataset.gameKey === focusedGame)?.focus({ preventScroll: true });
+  else if (contextId) [...document.querySelectorAll('[data-job-id], [data-game-id]')].find(node => (node.dataset.jobId || node.dataset.gameId) === contextId)?.querySelectorAll('button').forEach(node => { if (node.textContent === focusedLabel) node.focus({ preventScroll: true }); });
   else if (focusedSave) [...document.querySelectorAll('.save-row')].find(node => node.dataset.gameId === focusedSave)
     ?.querySelectorAll('button').forEach(node => { if (node.textContent === focusedLabel) node.focus(); });
-  else if (focusedLabel) [...document.querySelectorAll('#content button')].find(node => node.textContent === focusedLabel)?.focus();
+  else if (focusedLabel) [...document.querySelectorAll('#content button')].find(node => node.textContent === focusedLabel)?.focus({ preventScroll: true });
+  if (!active || active === document.body) controls?.initial();
+  requestAnimationFrame(updateScrollHint);
 }
 
 async function refresh(force = false) {
@@ -526,6 +547,11 @@ async function refresh(force = false) {
   } finally { reading = false; }
 }
 
+function updateScrollHint() {
+  const main = document.querySelector('main');
+  document.querySelector('#scroll-hint').textContent = main.scrollHeight - main.scrollTop - main.clientHeight > 12 ? '↓ More below' : '';
+}
+
 function mount() {
   document.querySelector('#app').innerHTML = `
     <header class="topbar"><div class="topbar-inner">
@@ -534,8 +560,15 @@ function mount() {
     </div></header>
     <main><header class="page-heading"><div><h1>Games</h1><p id="description" class="muted">Connecting to this device…</p></div><button id="refresh">Refresh</button></header>
       <p id="notice" role="status" aria-live="polite"></p><div id="content"></div>
-      <footer><span id="service-state">Connecting to background service…</span><span>Non-Steam games · Your devices</span></footer>
-    </main><dialog aria-label="Save details"></dialog>`;
+    </main>
+    <footer class="controller-bar"><span id="service-state">Connecting to background service…</span><span id="scroll-hint"></span><div class="controller-hints"><span><kbd>LB</kbd><kbd>RB</kbd> Tabs</span><span><kbd>A</kbd> Select</span><span><kbd>B</kbd> Back</span><span><kbd>RS</kbd> Scroll</span></div></footer>
+    <dialog aria-label="Game and save details"></dialog>`;
+  controls = controllerNavigation({ changeTab: direction => {
+    const index = screens.indexOf(page);
+    location.hash = screens[(index + direction + screens.length) % screens.length].toLowerCase();
+  } });
+  document.querySelector('main').addEventListener('scroll', updateScrollHint, { passive: true });
+  new ResizeObserver(updateScrollHint).observe(document.querySelector('main'));
   for (const name of screens) {
     const link = el('a', name); link.href = `#${name.toLowerCase()}`;
     document.querySelector('nav').append(link);
@@ -548,7 +581,7 @@ function mount() {
   };
   window.addEventListener('hashchange', () => {
     page = screens.find(name => name.toLowerCase() === location.hash.slice(1)) || 'Games';
-    if (state) render(true);
+    if (state) { render(true); document.querySelector('main').scrollTop = 0; controls.initial(); }
   });
 }
 mount();

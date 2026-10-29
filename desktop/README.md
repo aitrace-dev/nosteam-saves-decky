@@ -28,6 +28,22 @@ been exercised on Bazzite. Launching the app through a Steam shortcut has also b
 launcher clears overlay preloads that otherwise crash Chromium zygotes. Physical
 controller navigation and real-game handoffs still need acceptance testing.
 
+## Controller interface
+
+The app uses a fixed navigation rail and controller hint bar, with one scrolling
+content area. Games is split into This device, Other devices and Installed rather
+than a long dashboard. Each game is one focusable tile; A opens its actions and B
+returns to the same tile. D-pad/left stick moves focus, LB/RB switches main screens,
+and the right stick scrolls. Keyboard arrows, Enter, Escape and Page Up/Down work
+with Steam Input keyboard mappings. Settings includes Close app; sync stays running.
+
+Steam/Gamescope launches open fullscreen and scale the interface for the display,
+including 2560×1600 and 4K. Desktop sessions retain a normal window. Controller mode
+hides the thin scroll thumb and shows a More below cue when content continues.
+Focus is restored after background updates, and dialogs contain navigation.
+Virtual gamepad tests cover these actions in the actual Electron renderer; physical
+Legion Go controls still need hardware acceptance.
+
 ## Use
 
 Sign in on each device. Games shows discovered non-Steam shortcuts and local Steam

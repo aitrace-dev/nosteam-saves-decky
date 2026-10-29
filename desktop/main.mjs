@@ -1,5 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, session } from 'electron';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { gamingSession, consoleZoom } from './window-layout.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ensureService, request, signInURL, steamGameURL } from './transport.mjs';
 
@@ -15,14 +17,24 @@ function trusted(event) {
 }
 
 function createWindow() {
+  let gamescopeProperty = '';
+  if (process.platform === 'linux') {
+    try { gamescopeProperty = execFileSync('xprop', ['-root', 'GAMESCOPE_PID'], { encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'] }); } catch {}
+  }
+  const consoleMode = process.platform === 'linux' && gamingSession(process.env, gamescopeProperty);
   window = new BrowserWindow({
-    title: 'NoSteam', width: 1180, height: 780, minWidth: 360, minHeight: 480,
+    title: 'NoSteam', width: 1180, height: 780, minWidth: 640, minHeight: 480,
+    fullscreen: consoleMode, frame: !consoleMode,
     backgroundColor: '#102139', autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(here, 'preload.cjs'), contextIsolation: true,
       nodeIntegration: false, sandbox: true, webviewTag: false,
     },
   });
+  window.removeMenu();
+  const scaleConsole = () => { if (consoleMode) { const [width, height] = window.getContentSize(); window.webContents.setZoomFactor(consoleZoom(width, height)); } };
+  window.on('resize', scaleConsole);
+  window.webContents.on('did-finish-load', scaleConsole);
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.loadFile(path.join(here, 'dist/index.html'));
@@ -37,6 +49,7 @@ else {
   app.whenReady().then(async () => {
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
+    ipcMain.handle('nosteam:close', event => { trusted(event); window.close(); });
     ipcMain.handle('nosteam:status', event => { trusted(event); return request('/v1/status'); });
     ipcMain.handle('nosteam:artwork', (event, key, kind) => {
       trusted(event);

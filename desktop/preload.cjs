@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('nosteam', {
+  close: () => ipcRenderer.invoke('nosteam:close'),
   status: () => ipcRenderer.invoke('nosteam:status'),
   artwork: (key, kind) => ipcRenderer.invoke('nosteam:artwork', key, kind),
   submit: (action, args = {}) => ipcRenderer.invoke('nosteam:submit', action, args),
