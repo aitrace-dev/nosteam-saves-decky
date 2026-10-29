@@ -542,3 +542,57 @@ def test_linux_prefix_preserves_case_distinct_wine_paths(tmp_path, monkeypatch):
     manifest["directories"].append("prefix/pfx/drive_c/windows/DriverStore")
     with pytest.raises(ValueError, match="Duplicate"):
         game_files.validate(manifest)
+
+
+def test_make_available_uses_steam_installation_and_queues_only_one_background_job(
+    tmp_path, monkeypatch
+):
+    from nosteam_client.automatic import shortcut_key
+
+    source = tmp_path / "source"
+    root, shortcut, binding = steam_home(source)
+    monkeypatch.setattr(Path, "home", lambda: source)
+    state = source / "state"
+    update_config(
+        lambda cfg: cfg.update(
+            account_id="owner", game_sync_enabled=True, games={"portable": binding}
+        ),
+        state,
+    )
+    manager = game_sync.GameSync(state, threading.Event())
+    monkeypatch.setattr(game_sync, "discover", lambda: [shortcut])
+    result = manager.share(shortcut_key(shortcut))
+    assert manager.share(shortcut_key(shortcut)) == result
+    with manager.connect() as db:
+        job = db.execute("SELECT * FROM jobs WHERE id=?", (result["job"],)).fetchone()
+    assert job["root"] == str(root)
+    assert job["state"] == "queued"
+    assert not manager.status()["shared_games"]
+    manager.update(result["job"], state="running")
+    manager.index(job)
+    status = manager.status()
+    assert status["shared_games"] == ["portable"]
+    assert status["jobs"][0]["verified"] == status["jobs"][0]["total"] > 0
+
+
+def test_installation_preparation_reports_bytes_and_rejects_generic_launcher_folders(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "source"
+    root, shortcut, binding = steam_home(source)
+    monkeypatch.setattr(Path, "home", lambda: source)
+    progress = []
+    manifest, _ = game_bundle.build(
+        root,
+        "portable",
+        shortcut,
+        binding,
+        progress=lambda done, total: progress.append((done, total)),
+    )
+    total = sum(entry["size"] for entry in manifest["files"])
+    assert progress[0] == (0, total)
+    assert progress[-1] == (total, total)
+    assert [done for done, _ in progress] == sorted(done for done, _ in progress)
+    shortcut["exe"] = str(source / ".local/bin/graphics-helper")
+    with pytest.raises(ValueError, match="launcher"):
+        game_bundle.installation_root(shortcut)

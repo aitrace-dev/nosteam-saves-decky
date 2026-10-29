@@ -29,7 +29,7 @@ snapshot.sync = empty ? null : {
   })),
 };
 snapshot.game_sync = {
-  enabled: !empty, state: empty ? 'off' : 'active', sharing: empty ? 0 : 1,
+  enabled: !empty, state: empty ? 'off' : 'active', sharing: empty ? 0 : 1, shared_games: empty ? [] : ['celeste'],
   self_device_id: 'handheld',
   offers: empty ? [] : [
     { game: 'celeste', title: 'Celeste', version: 'a'.repeat(64), size: 1280 * 1024 ** 2, files: 120,
@@ -101,7 +101,7 @@ window.nosteam = {
     const game = games.find(game => game.key === key);
     const id = crypto.randomUUID();
     snapshot.game_sync.jobs.unshift({ id, kind: 'index', game: game.id, title: game.title,
-      state: 'completed', total: 1280 * 1024 ** 2, verified: 0, created: Date.now() / 1000 });
+      state: 'completed', total: 1280 * 1024 ** 2, verified: 1280 * 1024 ** 2, created: Date.now() / 1000 });
     tasks.set(id, { state: 'completed', result: { job: id } });
     return { id };
   },

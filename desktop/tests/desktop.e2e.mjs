@@ -36,6 +36,12 @@ test('real desktop app reuses existing saves and leaves its service running afte
     page.setDefaultNavigationTimeout(8000);
     await page.waitForFunction(() => document.querySelector('#service-state')?.textContent === 'Background service connected');
     assert.equal(await page.locator('h1').textContent(), 'Games');
+    await electron.evaluate(({ dialog }) => {
+      dialog.showOpenDialog = async () => { throw new Error('Sharing unexpectedly opened a blocking folder picker'); };
+    });
+    const shared = await page.evaluate(() => window.nosteam.shareGame('a'.repeat(64)));
+    assert.match(shared.id, /^[0-9a-f-]{36}$/);
+    assert.equal(await page.locator('h1').textContent(), 'Games');
     if (process.env.NOSTEAM_SCREENSHOT) await page.screenshot({ path: process.env.NOSTEAM_SCREENSHOT });
     await page.getByRole('link', { name: 'Saves', exact: true }).click();
     await page.getByRole('heading', { name: 'Celeste', exact: true }).waitFor();

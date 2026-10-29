@@ -165,8 +165,12 @@ async function setupSaves(game) {
   if (result) { showNotice(`Save sync configured for ${game.title}. Reopen Steam to play.`); await refresh(true); }
 }
 async function shareGame(game) {
-  const result = await waitTask(await bridge.shareGame(game.key));
-  if (result) { showNotice(`Indexing ${game.title} for sharing.`); location.hash = 'transfers'; await refresh(true); }
+  const task = await bridge.shareGame(game.key);
+  showNotice(`Preparing ${game.title} in the background. You can keep using NoSteam.`);
+  location.hash = 'transfers';
+  await refresh(true);
+  await waitTask(task);
+  await refresh(true);
 }
 async function downloadGame(offer) {
   const result = await waitTask(await bridge.downloadGame(offer.game, offer.version));
@@ -246,7 +250,13 @@ function gameDetails(shortcut, game) {
     if (game.status === 'conflict') resolve(game); else location.hash = 'saves';
   }, true));
   else if (state.device.connected) actions.append(button('Set up saves', async () => { dialog.close(); await setupSaves(shortcut); }, true));
-  if (game && state.game_sync?.enabled) actions.append(button('Share game folder', async () => { dialog.close(); await shareGame({ ...shortcut, id: game.id }); }));
+  if (game && state.game_sync?.enabled) {
+    const preparing = state.game_sync.jobs.find(job => job.kind === 'index' && job.game === game.id && ['queued', 'running', 'paused'].includes(job.state));
+    const shared = state.game_sync.shared_games?.includes(game.id);
+    if (preparing) actions.append(button('View preparation', () => { dialog.close(); location.hash = 'transfers'; }));
+    else actions.append(button(shared ? 'Update shared installation' : 'Make available on my devices', async () => { dialog.close(); await shareGame({ ...shortcut, id: game.id }); }));
+    if (shared) dialog.append(el('p', 'Available to your devices', 'status'));
+  }
   actions.append(button('Back to library', () => dialog.close()));
   dialog.append(actions);
   dialog.showModal();
@@ -422,7 +432,7 @@ function transfers(container) {
       if (job.ready) controls.append(button('Play in Steam', () => bridge.playInstallation(job.id), true));
       controls.append(button('Open folder', () => bridge.openInstallation(job.id)));
     }
-    const label = job.kind === 'index' ? job.state === 'completed' ? 'Ready to share' : job.state === 'running' ? 'Indexing game folder' : labels[job.state] : labels[job.state];
+    const label = job.kind === 'index' ? job.state === 'completed' ? 'Available to your devices' : job.state === 'running' ? 'Preparing installation' : labels[job.state] : labels[job.state];
     block.append(row(job.title, `${label || job.state} · ${job.kind === 'index' ? 'Sharing' : 'Download'}`, controls));
     if (job.kind === 'download') {
       const progress = el('progress'); progress.max = job.total || 1; progress.setAttribute('aria-label', `${job.title} verified download progress`);
@@ -433,7 +443,11 @@ function transfers(container) {
         const remaining = rate > 0 && job.total ? Math.ceil((job.total - job.verified) / rate) : null;
         block.append(el('p', rate > 0 ? `${bytes(rate)}/s verified${remaining !== null ? ` · About ${remaining < 60 ? `${remaining} seconds` : `${Math.ceil(remaining / 60)} minutes`} remaining` : ''}` : 'Calculating transfer speed…', 'muted'));
       }
-    } else if (job.total) block.append(el('p', `${bytes(job.total)} indexed`, 'muted'));
+    } else if (job.total) {
+      const progress = el('progress'); progress.max = job.total; progress.value = job.verified;
+      progress.setAttribute('aria-label', `${job.title} installation preparation progress`);
+      block.append(progress, el('p', `${bytes(job.verified)} checked of ${bytes(job.total)}`, 'muted'));
+    }
     if (job.ready) block.append(el('p', `Ready in Steam${job.proton ? ` · ${job.proton}` : ''}`, 'muted'));
     if (job.error) block.append(el('p', job.error, 'attention'));
     downloads.append(block);

@@ -75,9 +75,7 @@ else {
     ipcMain.handle('nosteam:share-game', async (event, key) => {
       trusted(event);
       if (typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid game.');
-      const result = await dialog.showOpenDialog(window, { title: 'Choose the installed game folder to share', properties: ['openDirectory'] });
-      if (result.canceled) return null;
-      return request('/v1/tasks', { action: 'share-game', arguments: { key, root: result.filePaths[0] } });
+      return request('/v1/tasks', { action: 'share-game', arguments: { key } });
     });
     ipcMain.handle('nosteam:download-game', async (event, game, version) => {
       trusted(event);

@@ -54,6 +54,8 @@ class GameSync:
                 root TEXT NOT NULL,manifest TEXT NOT NULL,size BIGINT NOT NULL,
                 PRIMARY KEY(owner,version)
             )""")
+            if "prepared" not in {row[1] for row in db.execute("PRAGMA table_info(jobs)")}:
+                db.execute("ALTER TABLE jobs ADD COLUMN prepared BIGINT NOT NULL DEFAULT 0")
             db.execute("UPDATE jobs SET state='queued' WHERE state IN ('running','verifying')")
         self.database.chmod(0o600)
 
@@ -78,12 +80,20 @@ class GameSync:
         with self.connect() as db:
             rows = db.execute(
                 "SELECT j.id,j.kind,j.game,j.title,j.version,j.state,j.created,j.total,j.error,"
-                "COALESCE((SELECT sum(size) FROM chunks WHERE job=j.id),0) AS verified "
+                "CASE WHEN j.kind='index' THEN j.prepared ELSE "
+                "COALESCE((SELECT sum(size) FROM chunks WHERE job=j.id),0) END AS verified "
                 "FROM jobs j WHERE owner=? ORDER BY created DESC LIMIT 100",
                 (owner,),
             ).fetchall()
             offered = db.execute("SELECT count(*) FROM sources WHERE owner=?", (owner,)).fetchone()[
                 0
+            ]
+            shared_games = [
+                row[0]
+                for row in db.execute(
+                    "SELECT DISTINCT game FROM sources WHERE owner=? ORDER BY game LIMIT 100",
+                    (owner,),
+                )
             ]
         catalog = self.catalog if self.catalog and self.catalog.get("owner") == owner else None
         jobs = []
@@ -102,6 +112,7 @@ class GameSync:
             "state": self.phase if self.enabled() else "off",
             "jobs": jobs,
             "sharing": offered,
+            "shared_games": shared_games,
             "offers": catalog["offers"] if catalog else [],
             "self_device_id": catalog.get("self_device_id") if catalog else None,
         }
@@ -139,6 +150,14 @@ class GameSync:
         identifier = str(uuid.uuid4())
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if kind == "index":
+                existing = db.execute(
+                    "SELECT id FROM jobs WHERE owner=? AND game=? AND root=? AND kind='index' "
+                    "AND state IN ('queued','running','paused') ORDER BY created DESC LIMIT 1",
+                    (self.owner(), game, str(root)),
+                ).fetchone()
+                if existing:
+                    return {"job": existing["id"]}
             if kind == "download":
                 existing = db.execute(
                     "SELECT id,state FROM jobs WHERE owner=? AND root=? AND version=? "
@@ -181,7 +200,7 @@ class GameSync:
         self.wake.set()
         return {"job": identifier}
 
-    def share(self, key, root):
+    def share(self, key):
         shortcuts = {shortcut_key(item): item for item in discover()}
         if key not in shortcuts:
             raise game_files.GameFileError("Only a discovered non-Steam game can be shared")
@@ -198,7 +217,12 @@ class GameSync:
             raise game_files.GameFileError(
                 "Configure this game's save folders before sharing its installation"
             )
-        return self.create("index", bound[0], shortcuts[key]["title"], root)
+        return self.create(
+            "index",
+            bound[0],
+            shortcuts[key]["title"],
+            game_bundle.installation_root(shortcuts[key]),
+        )
 
     def refresh(self):
         remote = Remote(configuration(self.home), home=self.home)
@@ -398,10 +422,21 @@ class GameSync:
         )
         if shortcut is None:
             raise game_files.GameFileError("This non-Steam shortcut is no longer installed")
+        next_report = 0
+
+        def progress(done, total):
+            nonlocal next_report
+            now = time.monotonic()
+            if now >= next_report or done == total:
+                self.update(job["id"], prepared=done, total=total)
+                next_report = now + 0.25
+
         with lock(self.home / "games" / job["game"] / "session.lock", blocking=False):
             manifest, mounts = game_bundle.build(
-                root, job["game"], shortcut, binding, lambda: self.cancelled(job)
+                root, job["game"], shortcut, binding, lambda: self.cancelled(job), progress=progress
             )
+        if self.cancelled(job):
+            raise InterruptedError("Installation preparation paused")
         version = game_files.version_id(manifest)
         size = game_files.validate(manifest)
         with self.connect() as db:
@@ -772,6 +807,12 @@ class GameSync:
                         "WHERE id=? AND state IN ('running','verifying')",
                         (str(error), time.time() + 10, row["id"]),
                     )
+            except BlockingIOError:
+                self.update(
+                    row["id"],
+                    state="failed",
+                    error="Close this game before preparing its installation, then choose Resume.",
+                )
             except game_files.GameFileError as error:
                 self.update(row["id"], state="failed", error=str(error))
             except (OSError, ValueError):

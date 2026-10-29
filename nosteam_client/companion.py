@@ -122,7 +122,7 @@ class Companion:
             expected = {"game", "choice"}
         expected = {
             "games-enable": {"enabled"},
-            "share-game": {"key", "root"},
+            "share-game": {"key"},
             "setup-saves": {"key", "root"},
             "download-game": {"game", "version", "root"},
             "pause-transfer": {"job"},
@@ -300,7 +300,7 @@ class Companion:
         if action == "refresh-games":
             return self.game_sync.refresh()
         if action == "share-game":
-            return self.game_sync.share(arguments["key"], arguments["root"])
+            return self.game_sync.share(arguments["key"])
         if action == "download-game":
             return self.game_sync.download(
                 arguments["game"], arguments["version"], arguments["root"]

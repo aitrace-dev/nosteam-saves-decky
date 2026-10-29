@@ -59,8 +59,10 @@ device is currently in sync. A device reports about every 30 seconds; freshness
 expires after 90 seconds. Playing or busy games remain uncertain until checked.
 
 Game sharing starts disabled. Enable it on participating devices, then choose
-**Share game folder** for a configured game on the source. Select the installation
-folder rather than the entire Proton prefix. On another device choose **Download**
+**Make available on my devices** for a configured game on the source. No folder
+picker opens: the service uses the Steam shortcut's executable and working directory,
+queues preparation and reports bytes checked in Transfers. Repeated requests reuse
+the same queued job. Pause/Resume stays available while preparation runs. On another device choose **Download**
 and a library folder. Transfers supports pause/resume, restart recovery, four
 parallel verified chunks, source failover and reuse of matching blocks from prior
 managed versions. Available devices with the same version can supply chunks.
@@ -71,8 +73,9 @@ Steam artwork. Existing prefix links to older Proton DLLs are included too.
 Regular game files keep their bytes, permissions and modification times. Internal
 symlinks are relocated inside the bundle; Wine drive/device mappings are retained.
 Only paths in copied registry files and text launch helpers are adapted to the
-new library. Select the game installation folder; NoSteam finds its prefix and
-runtime from the current Steam settings automatically.
+new library. NoSteam finds the installation, prefix and runtime from current Steam
+settings. Generic launcher directories such as bin or Downloads are rejected
+rather than sharing unrelated files.
 
 Downloads install into a new `NoSteam/<game>/<version>/files` folder. Existing game
 versions and saves are retained. With Steam closed, NoSteam journals registration

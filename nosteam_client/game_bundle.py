@@ -85,6 +85,47 @@ def current_options(value):
     return " ".join(result)
 
 
+def installation_root(shortcut):
+    executable = Path(shortcut["exe"].strip('"')).expanduser().resolve()
+    if not executable.is_absolute() or not executable.is_file():
+        raise GameFileError("The Steam shortcut executable is not available on this device")
+    root = executable.parent
+    with Path(shortcut["registry"]).open("rb") as stream:
+        rows = vdf.binary_load(stream)["shortcuts"]
+    for row in rows.values():
+        entry = folded(row)
+        if int(entry.get("appid", 0)) & 0xFFFFFFFF != int(shortcut["shortcut_id"]):
+            continue
+        working = entry.get("startdir", "").strip('"')
+        if working and Path(working).is_absolute():
+            candidate = Path(working).expanduser().resolve()
+            if executable.is_relative_to(candidate):
+                root = candidate
+        break
+    # A launcher in a generic folder does not authorize sharing its neighbours.
+    if root == Path.home().resolve() or root.name.casefold() in {
+        "desktop",
+        "downloads",
+        "documents",
+        "bin",
+        "sbin",
+        "applications",
+        "games",
+        "steam",
+        "steamapps",
+        "common",
+        "compatdata",
+        "compatibilitytools.d",
+        ".local",
+        "share",
+    }:
+        raise GameFileError(
+            "This shortcut points to a generic launcher folder. Set its executable and working "
+            "directory to the actual game installation in Steam."
+        )
+    return root
+
+
 def describe(root, shortcut, binding):
     root = Path(root).resolve()
     registry = Path(shortcut["registry"])
@@ -359,12 +400,17 @@ def inventory(mounts, helper_files=()):
     return regular, sorted(directories), sorted(links, key=lambda link: link["path"])
 
 
-def build(root, game, shortcut, binding, cancelled=lambda: False):
+def build(
+    root, game, shortcut, binding, cancelled=lambda: False, progress=lambda done, total: None
+):
     mounts, launch = describe(root, shortcut, binding)
     helper_files = set(launch["helpers"] + launch["dependency_files"] + launch["artwork"])
     before, directories, links = inventory(mounts, helper_files)
-    if sum(info[1][2] for info in before.values()) > files.MAX_GAME:
+    total = sum(info[1][2] for info in before.values())
+    if total > files.MAX_GAME:
         raise GameFileError("Installation exceeds the transfer size limit")
+    progress(0, total)
+    done = 0
     entries = []
     for name, (path, info) in sorted(before.items()):
         hashes = []
@@ -376,6 +422,8 @@ def build(root, game, shortcut, binding, cancelled=lambda: False):
                 if cancelled():
                     raise InterruptedError("Installation indexing paused")
                 hashes.append(hashlib.sha256(block).hexdigest())
+                done += len(block)
+                progress(done, total)
         entries.append(
             {
                 "path": name,
