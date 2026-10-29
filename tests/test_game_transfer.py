@@ -336,3 +336,35 @@ def test_invalid_chunk_fails_over_without_marking_corrupt_bytes_durable(tmp_path
     assert (stage / "game.bin").read_bytes() == data
     with manager.connect() as db:
         assert db.execute("SELECT size FROM chunks").fetchone()[0] == len(data)
+
+
+def test_website_reports_publish_only_progress_and_never_paths_or_error_details(tmp_path):
+    import threading
+
+    from nosteam_client.config import update_config
+    from nosteam_client.game_sync import GameSync
+
+    update_config(
+        lambda cfg: cfg.update(account_id="owner", game_sync_enabled=True), tmp_path / "state"
+    )
+    manager = GameSync(tmp_path / "state", threading.Event())
+    library = tmp_path / "library"
+    library.mkdir()
+    job = manager.create("download", "celeste", "Celeste", str(library), "a" * 64)["job"]
+    manager.update(job, state="failed", total=100, error="private /home/alice/path details")
+    calls = []
+
+    class Remote:
+        def request(self, method, path, **kwargs):
+            calls.append((method, path, kwargs["json"]))
+            return {"accepted": len(calls) > 1, "sequence": 50}
+
+    manager.publish_status(Remote(), "owner")
+    payload = calls[0][2]
+    assert payload["jobs"][0]["state"] == "failed"
+    assert not {"root", "destination", "error", "manifest"} & payload["jobs"][0].keys()
+    assert "alice" not in str(payload)
+    manager.publish_status(Remote(), "owner")
+    assert calls[1][2]["sequence"] == 51
+    manager.publish_status(Remote(), "other-account")
+    assert len(calls) == 2

@@ -288,6 +288,48 @@ class GameSync:
             source["mounts"] = json.loads(row["root"])
         return source
 
+    def publish_status(self, remote, owner):
+        if self.owner() != owner:
+            return
+        status = self.status()
+        with lock(self.home / "transfer-report.lock"):
+            path = self.home / "transfer-report-sequence.json"
+            sequence = read_json(path, {"sequence": 0})["sequence"] + 1
+            atomic_json(path, {"sequence": sequence})
+        fields = {
+            "id",
+            "game",
+            "title",
+            "version",
+            "kind",
+            "state",
+            "total",
+            "verified",
+            "ready",
+            "proton",
+        }
+        jobs = [
+            {key: value for key, value in job.items() if key in fields}
+            for job in status["jobs"][:50]
+        ]
+        for job in jobs:
+            job["title"] = job["title"][:200]
+            job["proton"] = job["proton"][:200]
+        payload = {
+            "sequence": sequence,
+            "enabled": status["enabled"],
+            "state": status["state"],
+            "jobs": jobs,
+        }
+        while len(json.dumps(payload).encode()) > 60 * 1024:
+            payload["jobs"].pop()
+        if self.owner() == owner:
+            accepted = remote.request("POST", "/v1/transfers/report", json=payload)
+            if accepted and not accepted.get("accepted", True):
+                with lock(self.home / "transfer-report.lock"):
+                    current = read_json(path, {"sequence": 0})["sequence"]
+                    atomic_json(path, {"sequence": max(current, accepted["sequence"])})
+
     def network(self):
         while not self.stop.is_set():
             self.wake.clear()
@@ -307,8 +349,8 @@ class GameSync:
                 if cfg.get("token") and not cfg.get("auth_required"):
                     remote = Remote(cfg, home=self.home)
                     try:
+                        contract = remote.request("GET", "/v1/transfers/config")
                         if self.enabled():
-                            contract = remote.request("GET", "/v1/transfers/config")
                             if self.peer:
                                 self.peer.issuer = contract["issuer"]
                                 self.peer.public_key = contract["public_key"]
@@ -376,6 +418,8 @@ class GameSync:
                             if self.enabled()
                             else "off"
                         )
+                        if contract.get("status_reports"):
+                            self.publish_status(remote, cfg.get("account_id"))
                     finally:
                         remote.close()
             except OSError as error:
