@@ -28,7 +28,7 @@ test('real desktop app reuses existing saves and leaves its service running afte
   try {
     electron = await _electron.launch({
       executablePath: process.env.NOSTEAM_ELECTRON,
-      args: process.env.NOSTEAM_ELECTRON ? [] : [desktop], env,
+      args: [...(process.env.NOSTEAM_ELECTRON ? [] : [desktop]), '--user-data-dir=' + path.join(directory, 'profile')], env,
     });
     electronProcess = electron.process();
     const page = await electron.firstWindow();
@@ -64,6 +64,24 @@ test('real desktop app reuses existing saves and leaves its service running afte
     await page.evaluate(() => { window.testPad.buttons[5].pressed = false; window.testPad.buttons[1].pressed = true; });
     await page.waitForFunction(() => document.activeElement.matches('nav a[aria-current]'));
     await page.evaluate(() => { window.testPad.buttons[1].pressed = false; });
+    const cdp = await page.context().newCDPSession(page);
+    // Playwright otherwise forces document.hasFocus() true even behind native dialogs.
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+    await electron.evaluate(({ BrowserWindow }) => {
+      globalThis.focusProbe = new BrowserWindow({ width: 150, height: 100 });
+      globalThis.focusProbe.loadURL('about:blank');
+    });
+    await page.waitForFunction(() => !document.hasFocus());
+    await page.evaluate(() => { window.testPad.buttons[5].pressed = true; });
+    await page.waitForTimeout(200);
+    assert.equal(await page.locator('h1').textContent(), 'Settings');
+    await electron.evaluate(({ BrowserWindow }) => {
+      globalThis.focusProbe.destroy();
+      BrowserWindow.getAllWindows()[0].focus();
+    });
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await cdp.detach();
+    await page.evaluate(() => { window.testPad.buttons[5].pressed = false; });
     await page.keyboard.press('PageUp');
     await page.getByRole('heading', { name: 'Devices', exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollHeight > innerHeight), false);

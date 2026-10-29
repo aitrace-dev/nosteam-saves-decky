@@ -88,6 +88,8 @@ export function controllerNavigation({ changeTab }) {
   function poll(now) {
     const pad = [...(navigator.getGamepads?.() || [])].find(item => item?.connected);
     const actions = new Set(pad ? gamepadActions(pad) : []);
+    // Steam overlays and native folder dialogs must not activate controls underneath.
+    if (!document.hasFocus()) { previous = actions; requestAnimationFrame(poll); return; }
     const scroll = pad?.axes[3] || 0;
     if (Math.abs(scroll) > .25) {
       document.documentElement.classList.add('controller-mode');
